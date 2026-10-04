@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 
 #include "chat/constants.h"
 #include "chat/log.h"
@@ -16,6 +17,54 @@
 #include "chat/config_manager.h"
 #include "chat_grpc_client.h"
 namespace P1 {
+namespace {
+// 查目标用户所在节点；不在线返回空
+std::optional<std::string> GetPeerServer(int32_t uid)
+{
+    return RedisManagerPool::GetInstance().Get(USER_SERVER_PREFIX + std::to_string(uid));
+}
+
+// 目标用户是否在本节点（AddFriend/AuthFriend/TextChatMsg 三处共用的路由判断）
+bool IsPeerLocal(const std::optional<std::string> &peerServer)
+{
+    return peerServer.has_value() &&
+        *peerServer == ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
+}
+
+// uinfo_ 用户资料缓存的统一 TTL：防止资料变更后脏数据永久驻留
+constexpr auto USER_INFO_CACHE_TTL = std::chrono::seconds(3600);
+
+// 登录响应里申请/好友列表的字段很多是共用的，统一序列化，供 HandleLogin 使用
+void AppendApplyList(Json::Value &dst, const std::vector<std::shared_ptr<ApplyInfo>> &list)
+{
+    for (const auto &apply : list) {
+        Json::Value obj;
+        obj["name"] = apply->name;
+        obj["uid"] = apply->uid;
+        obj["icon"] = apply->icon;
+        obj["nick"] = apply->nick;
+        obj["sex"] = apply->sex;
+        obj["desc"] = apply->desc;
+        obj["status"] = apply->status;
+        dst["apply_list"].append(obj);
+    }
+}
+
+void AppendFriendList(Json::Value &dst, const std::vector<std::shared_ptr<UserInfo>> &list)
+{
+    for (const auto &f : list) {
+        Json::Value obj;
+        obj["name"] = f->name;
+        obj["uid"] = f->uid;
+        obj["icon"] = f->icon;
+        obj["nick"] = f->nick;
+        obj["sex"] = f->sex;
+        obj["desc"] = f->desc;
+        obj["back"] = f->back;
+        dst["friend_list"].append(obj);
+    }
+}
+} // namespace
 LogicSystem::LogicSystem() : stop_(false)
 {
     RegisterHandleCallback();
@@ -52,15 +101,16 @@ void LogicSystem::DealMessage()
             }
             node = msgQue_.front();
             msgQue_.pop();
-            try {
-                ProcessMessage(node);
-            } catch (const std::exception& e) {
-                // 单条消息处理异常不能拖垮整个业务线程，否则所有消息停止分发
-                LOG_ERROR("[LogicSystem] process message exception, msgId:%u, error:%s",
-                    node->msgNode_ ? node->msgNode_->GetMsgId() : 0, e.what());
-            } catch (...) {
-                LOG_ERROR("[LogicSystem] process message unknown exception");
-            }
+        }
+        // 消息处理放在锁外：慢 handler（DB/RPC）不再阻塞新消息入队
+        try {
+            ProcessMessage(node);
+        } catch (const std::exception& e) {
+            // 单条消息处理异常不能拖垮整个业务线程，否则所有消息停止分发
+            LOG_ERROR("[LogicSystem] process message exception, msgId:%u, error:%s",
+                node->msgNode_ ? node->msgNode_->GetMsgId() : 0, e.what());
+        } catch (...) {
+            LOG_ERROR("[LogicSystem] process message unknown exception");
         }
     }
 }
@@ -128,33 +178,13 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     // 获取申请列表
     std::vector<std::shared_ptr<ApplyInfo>> applyList;
     if (MysqlMganager::GetInstance().GetApplyList(uid, applyList, 0, 10)) {
-        for (auto & apply : applyList) {
-            Json::Value obj;
-            obj["name"] = apply->name;
-            obj["uid"] = apply->uid;
-            obj["icon"] = apply->icon;
-            obj["nick"] = apply->nick;
-            obj["sex"] = apply->sex;
-            obj["desc"] = apply->desc;
-            obj["status"] = apply->status;
-            retValue["apply_list"].append(obj);
-        }
+        AppendApplyList(retValue, applyList);
     }
 
-    //获取好友列表
+    // 获取好友列表
     std::vector<std::shared_ptr<UserInfo>> friendList;
     MysqlMganager::GetInstance().GetFriendList(uid, friendList);
-    for (auto& f : friendList) {
-        Json::Value obj;
-        obj["name"] = f->name;
-        obj["uid"] = f->uid;
-        obj["icon"] = f->icon;
-        obj["nick"] = f->nick;
-        obj["sex"] = f->sex;
-        obj["desc"] = f->desc;
-        obj["back"] = f->back;
-        retValue["friend_list"].append(obj);
-    }
+    AppendFriendList(retValue, friendList);
 
     auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
     // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前），
@@ -255,7 +285,8 @@ bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::s
     root["nick"] = info->nick;
     root["desc"] = info->desc;
     root["icon"] = info->icon;
-    RedisManagerPool::GetInstance().Set(baseKey, root.toStyledString());
+    // 注意：缓存中不写 pwd——敏感数据不落 Redis；带 TTL，资料变更后最多 1 小时自愈
+    RedisManagerPool::GetInstance().SetEx(baseKey, root.toStyledString(), USER_INFO_CACHE_TTL);
     LOG_INFO("[LogicSystem] GetBaseUserInfo from mysql, uid:%d, name:%s", uid, userInfo->name.c_str());
     return true;
 }
@@ -304,9 +335,7 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
     rtValue["nick"] = info->nick;
     rtValue["desc"] = info->desc;
     rtValue["icon"] = info->icon;
-    RedisManagerPool::GetInstance().Set(key, rtValue.toStyledString());
-    rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-    LOG_INFO("[LogicSystem] HandleSearchUser from mysql, uid:%d, name:%s", uid, info->name.c_str());
+    LOG_INFO("[LogicSystem] HandleSearchUser ok, uid:%d, name:%s", uid, info->name.c_str());
 }
 
 // from_uid ----> to_uid  apply_info name
@@ -331,14 +360,12 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
     });
 
     MysqlMganager::GetInstance().AddFriendApply(from_uid, to_uid);
-    auto key = USER_SERVER_PREFIX + std::to_string(to_uid);
-    auto to_server = RedisManagerPool::GetInstance().Get(key);
+    auto to_server = GetPeerServer(to_uid);
     if (!to_server.has_value()) {
         LOG_INFO("[LogicSystem] HandleAddFriend, to_uid:%d offline", to_uid);
         return;
     }
-    auto self_server = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
-    if (to_server.value() == self_server) {
+    if (IsPeerLocal(to_server)) {
         auto psession = UserManager::GetInstance().GetSession(to_uid);
         if (!psession) {
             LOG_WARN("[LogicSystem] HandleAddFriend, to_uid:%d session not found", to_uid);
@@ -435,18 +462,22 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
         action == FRIEND_ACTION_ACCEPT ? "accepted" : "rejected", peer_uid, self_uid);
 
     // 3) 通知申请者处理结果（在线才通知，离线时其重新登录会拉取最新申请状态）
-    auto key = USER_SERVER_PREFIX + std::to_string(peer_uid);
-    auto peer_server = RedisManagerPool::GetInstance().Get(key);
+    NotifyAuthResult(peer_uid, self_uid, action);
+}
+
+// 通知申请者好友申请处理结果：在线才通知，离线时其重新登录会拉取最新申请状态
+void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action)
+{
+    auto peer_server = GetPeerServer(peer_uid);
     if (!peer_server.has_value()) {
-        LOG_INFO("[LogicSystem] HandleAuthFriend, peer_uid:%d offline", peer_uid);
+        LOG_INFO("[LogicSystem] NotifyAuthResult, peer_uid:%d offline", peer_uid);
         return;
     }
 
-    auto self_server = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
-    if (peer_server.value() == self_server) {
+    if (IsPeerLocal(peer_server)) {
         auto psession = UserManager::GetInstance().GetSession(peer_uid);
         if (!psession) {
-            LOG_WARN("[LogicSystem] HandleAuthFriend, peer_uid:%d session not found", peer_uid);
+            LOG_WARN("[LogicSystem] NotifyAuthResult, peer_uid:%d session not found", peer_uid);
             return;
         }
         Json::Value val;
@@ -478,7 +509,7 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
     accept_req.set_from_uid(peer_uid);
     accept_req.set_to_uid(self_uid);
     accept_req.set_action(action);
-    LOG_INFO("[LogicSystem] HandleAuthFriend rpc to server:%s, from:%d, to:%d, action:%d",
+    LOG_INFO("[LogicSystem] NotifyAuthResult rpc to server:%s, from:%d, to:%d, action:%d",
         peer_server.value().c_str(), peer_uid, self_uid, action);
     ChatGrpcClient::GetInstance().NotifyFriendAccepted(peer_server.value(), accept_req);
 }
@@ -504,15 +535,13 @@ void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uin
     });
 
     //查询redis 查找peer_uid对应的server ip
-    auto peer_key = USER_SERVER_PREFIX + std::to_string(peer_uid);
-    auto peer_server = RedisManagerPool::GetInstance().Get(peer_key);
+    auto peer_server = GetPeerServer(peer_uid);
     if (!peer_server.has_value()) {
         return;
     }
 
-    auto self_server =  ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
     //直接通知对方有文本聊天消息
-    if (peer_server.value() == self_server) {
+    if (IsPeerLocal(peer_server)) {
         auto psession = UserManager::GetInstance().GetSession(peer_uid);
         if (psession) {  
             //在内存中则直接发送通知对方

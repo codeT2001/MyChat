@@ -407,8 +407,9 @@ bool MysqlDao::CheckPassword(const std::string& name, const std::string& pwd, Us
     Defer defer([this, &conn] { pool_->Release(std::move(conn)); });
 
     try {
+        // 登录校验只需身份字段，列收窄避免拉取整行
         std::unique_ptr<sql::PreparedStatement> pstmt(
-            conn->conn_->prepareStatement("SELECT * FROM user WHERE name = ? AND pwd = ?"));
+            conn->conn_->prepareStatement("SELECT uid, email FROM user WHERE name = ? AND pwd = ?"));
         pstmt->setString(1, name);
         pstmt->setString(2, pwd);
 
@@ -419,7 +420,6 @@ bool MysqlDao::CheckPassword(const std::string& name, const std::string& pwd, Us
             userInfo.name = name;
             userInfo.email = res->getString("email");
             userInfo.uid = res->getInt("uid");
-            userInfo.pwd = pwd;
             found = true;
         }
         res->close(); // 关键：显式关闭
@@ -443,8 +443,11 @@ std::shared_ptr<UserInfo> MysqlDao::GetUserByUid(uint32_t uid)
     Defer defer([this, &conn] { pool_->Release(std::move(conn)); });
 
     try {
+        // 列收窄：pwd 列不再进入结果集（回包/缓存均不需要，减少 IO 且避免敏感数据驻留内存）
+        // 注意：desc 是 MySQL 保留字（ORDER BY DESC），必须反引号转义，否则整条 SQL 语法报错
         std::unique_ptr<sql::PreparedStatement> pstmt(
-            conn->conn_->prepareStatement("SELECT * FROM user WHERE uid = ?"));
+            conn->conn_->prepareStatement(
+                "SELECT uid, sex, name, email, nick, `desc`, icon FROM user WHERE uid = ?"));
         pstmt->setInt(1, uid);
 
         std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
@@ -455,7 +458,6 @@ std::shared_ptr<UserInfo> MysqlDao::GetUserByUid(uint32_t uid)
             userInfo->uid = res->getInt("uid");
             userInfo->sex = res->getInt("sex");
             userInfo->name = res->getString("name");
-            userInfo->pwd = res->getString("pwd");
             userInfo->email = res->getString("email");
             userInfo->nick = res->getString("nick");
             userInfo->desc = res->getString("desc");

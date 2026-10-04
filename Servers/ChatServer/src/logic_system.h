@@ -42,6 +42,8 @@ private:
     // 与本节点相同则直接发踢下线通知，否则走跨节点 gRPC
     void KickOldSession(int32_t uid, const std::string& oldServer,
         const std::shared_ptr<CSession>& oldLocalSession);
+    // 好友申请处理结果通知申请者：在线时按节点直发/跨节点 gRPC
+    void NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action);
     LogicSystem();
     std::queue<std::shared_ptr<LogicNode>> msgQue_;
     std::mutex msgMtx_;

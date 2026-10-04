@@ -80,8 +80,10 @@ void CServer::RemoveSession(uint32_t sessionId)
     if (route.has_value() && *route == serverName) {
         redis.Del(routeKey);
     }
-    // token 只服务于本次 TCP 登录，退出即失效，下次登录走 Gate 重新领取
-    redis.Del(USER_TOKEN_PREFIX + uidStr);
+    // 注意：这里不能删 utoken_{uid}。旧连接的断开清理与新登录是并发的，
+    // 若在此删 token，会恰好删掉 StatusServer 刚为新登录写入的 token，
+    // 导致新登录读到 UID_INVALID(8)。token 由 StatusServer 下次登录时覆盖，
+    // 并带 TTL 自动过期，无需在此清理。
     // 用户资料缓存一并清除，下次登录强制回源 MySQL，保证资料最新
     redis.Del(USER_INFO_PREFIX + uidStr);
     LOG_INFO("[CServer] session closed, redis cleaned, uid:%u, sessionId:%u", uid, sessionId);

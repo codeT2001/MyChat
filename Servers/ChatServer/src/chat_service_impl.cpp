@@ -2,13 +2,17 @@
 #include "csession.h"
 #include "chat/mysql_manager.h"
 #include "user_manager.h"
+#include <chrono>
 #include <jsoncpp/json/value.h>
 #include <jsoncpp/json/reader.h>
 #include "chat/constants.h"
 #include "chat/log.h"
 #include "chat/redis_manager.h"
 namespace P1 {
-
+namespace {
+// uinfo_ 用户资料缓存的统一 TTL：防止资料变更后脏数据永久驻留
+constexpr auto USER_INFO_CACHE_TTL = std::chrono::seconds(3600);
+}
 ChatServiceImpl::ChatServiceImpl() = default;
 
 ChatServiceImpl::~ChatServiceImpl() = default;
@@ -179,7 +183,8 @@ bool ChatServiceImpl::GetBaseInfo(const std::string& baseKey, int32_t uid, std::
 	val["desc"] = userInfo->desc;
 	val["sex"] = userInfo->sex;
 	val["icon"] = userInfo->icon;
-	RedisManagerPool::GetInstance().Set(baseKey, val.toStyledString());
+	// 缓存带 TTL（与 logic_system GetBaseUserInfo 一致），资料变更后最多 1 小时自愈
+	RedisManagerPool::GetInstance().SetEx(baseKey, val.toStyledString(), USER_INFO_CACHE_TTL);
 	return true;
 }
 } // namespace P1

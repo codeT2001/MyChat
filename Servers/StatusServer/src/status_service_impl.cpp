@@ -107,7 +107,9 @@ void StatusServiceImpl::InsertToken(int uid, std::string token)
 {
     std::string uid_str = std::to_string(uid);
     std::string token_key = USER_TOKEN_PREFIX + uid_str;
-    RedisManagerPool::GetInstance().Set(token_key, token); // 需要在用户退出清理token
+    // 带 TTL：登录 token 只需存活到客户端完成 TCP 登录（秒级），
+    // 残留 token 靠 TTL 自然过期，同时避免断开清理误删新登录 token 的竞态
+    RedisManagerPool::GetInstance().SetEx(token_key, token, std::chrono::seconds(600));
 }
 
 void StatusServiceImpl::StartCacheRefresher(std::chrono::seconds interval)

@@ -1,6 +1,7 @@
 #include "chat/redis_manager.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <queue>
@@ -83,6 +84,16 @@ void RedisManagerPool::Set(const std::string& key, const std::string& val)
         return;
     }
     client->set(key, val);
+}
+
+void RedisManagerPool::SetEx(const std::string& key, const std::string& val, std::chrono::seconds ttl)
+{
+    auto* client = Client();
+    if (!client) {
+        LogUnavailable("SetEx", key);
+        return;
+    }
+    client->set(key, val, ttl);
 }
 
 std::optional<std::string> RedisManagerPool::Get(const std::string& key)

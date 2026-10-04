@@ -13,7 +13,34 @@
 namespace P1 {
 namespace {
 const std::string CODE_PREFIX = "code_";
+
+// 解析 POST 请求体并校验必填 string 字段。
+// 失败时向 rsp 写入 ERROR_JSON 并返回 false（四个 POST 处理器共用）
+bool ParseBody(const std::shared_ptr<HttpConnection> &conn, Json::Value &src, Json::Value &rsp,
+               std::initializer_list<const char *> fields)
+{
+    const auto bodyStr = beast::buffers_to_string(conn->GetRequest().body().data());
+    Json::Reader reader;
+    if (!reader.parse(bodyStr, src)) {
+        rsp["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+        return false;
+    }
+    for (const auto *field : fields) {
+        if (!src.isMember(field) || !src[field].isString()) {
+            rsp["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+            return false;
+        }
+    }
+    return true;
 }
+
+// 校验邮箱验证码：不存在或已过期返回 false
+bool CheckVerifyCode(const std::string &email, const std::string &code)
+{
+    auto stored = RedisManagerPool::GetInstance().Get(CODE_PREFIX + email);
+    return stored.has_value() && stored == code;
+}
+} // namespace
 LogicSystem::LogicSystem()
 {
     RegisterGet("/get_test", LogicSystem::HandleGetTest);
@@ -67,66 +94,47 @@ void LogicSystem::HandleGetTest(HttpConnPtr conn)
 
 void LogicSystem::HandleGetVerifyCode(HttpConnPtr conn)
 {
-    auto& request = conn->GetRequest();
-    auto bodyStr = beast::buffers_to_string(request.body().data());
     auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "text/json");
+    response.set(http::field::content_type, "application/json");
     Json::Value root;
-    Json::Reader reader;
     Json::Value src;
-
-    if (!reader.parse(bodyStr, src) || !src.isMember("email")) {
-        LOG_WARN("[GateServer] GetVerifyCode bad request, invalid json or missing email");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
-    } else {
-        auto email = src["email"].asString();
-        LOG_INFO("[GateServer] GetVerifyCode, email:%s", email.c_str());
-        GetVerifyRsp rsp = VerifyGrpcClient::GetInstance().GetVerifyCode(email);
-        root["error"] = rsp.error();
-        root["email"] = src["email"];
-    }
-    beast::ostream(response.body()) << root.toStyledString();
-    return;
-}
-
-void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
-{
-    auto& request = conn->GetRequest();
-    auto bodyStr = beast::buffers_to_string(request.body().data());
-    LOG_INFO("[GateServer] RegisterUser request");
-
-    auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json"); // 更标准的 MIME
-
-    Json::Value root;
-    Json::Reader reader;
-    Json::Value src;
-
-    // 无论从哪个分支返回，统一写 HTTP 响应体
     Defer defer([&]() {
         beast::ostream(response.body()) << root.toStyledString();
     });
 
-    if (!reader.parse(bodyStr, src)) {
-        LOG_WARN("[GateServer] RegisterUser failed, invalid json");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+    if (!ParseBody(conn, src, root, {"email"})) {
+        LOG_WARN("[GateServer] GetVerifyCode bad request, invalid json or missing email");
         return;
     }
+    auto email = src["email"].asString();
+    LOG_INFO("[GateServer] GetVerifyCode, email:%s", email.c_str());
+    GetVerifyRsp rsp = VerifyGrpcClient::GetInstance().GetVerifyCode(email);
+    root["error"] = rsp.error();
+    root["email"] = src["email"];
+}
 
-    // 字段存在性 & 类型校验
-    if (!src.isMember("email") || !src["email"].isString() || !src.isMember("verifyCode") ||
-        !src["verifyCode"].isString() || !src.isMember("passwd") || !src["passwd"].isString()) {
-        LOG_WARN("[GateServer] RegisterUser failed, missing or invalid fields");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
+{
+    LOG_INFO("[GateServer] RegisterUser request");
+
+    auto& response = conn->GetResponse();
+    response.set(http::field::content_type, "application/json");
+
+    Json::Value root;
+    Json::Value src;
+    Defer defer([&]() {
+        beast::ostream(response.body()) << root.toStyledString();
+    });
+
+    if (!ParseBody(conn, src, root, {"email", "verifyCode", "passwd"})) {
+        LOG_WARN("[GateServer] RegisterUser failed, invalid json or missing fields");
         return;
     }
 
     std::string email = src["email"].asString();
     std::string verifyCode = src["verifyCode"].asString();
 
-    // 验证码校验
-    auto storedCode = RedisManagerPool::GetInstance().Get(CODE_PREFIX + email);
-    if (!storedCode.has_value() || storedCode != verifyCode) {
+    if (!CheckVerifyCode(email, verifyCode)) {
         LOG_WARN("[GateServer] RegisterUser failed, verify code not found or expired, email:%s", email.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::VERIFYCODE_NOT_FOUND_OR_EXPIRED);
         return;
@@ -152,42 +160,26 @@ void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
 
 void LogicSystem::HandleResetPassword(HttpConnPtr conn)
 {
-    auto& request = conn->GetRequest();
-    auto bodyStr = beast::buffers_to_string(request.body().data());
     LOG_INFO("[GateServer] ResetPassword request");
 
     auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json"); // 更标准的 MIME
+    response.set(http::field::content_type, "application/json");
 
     Json::Value root;
-    Json::Reader reader;
     Json::Value src;
-
-    // 无论从哪个分支返回，统一写 HTTP 响应体
     Defer defer([&]() {
         beast::ostream(response.body()) << root.toStyledString();
     });
 
-    if (!reader.parse(bodyStr, src)) {
-        LOG_WARN("[GateServer] ResetPassword failed, invalid json");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
-        return;
-    }
-
-    // 字段存在性 & 类型校验
-    if (!src.isMember("email") || !src["email"].isString() || !src.isMember("verifyCode") ||
-        !src["verifyCode"].isString() || !src.isMember("passwd") || !src["passwd"].isString()) {
-        LOG_WARN("[GateServer] ResetPassword failed, missing or invalid fields");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+    if (!ParseBody(conn, src, root, {"email", "verifyCode", "passwd"})) {
+        LOG_WARN("[GateServer] ResetPassword failed, invalid json or missing fields");
         return;
     }
 
     std::string email = src["email"].asString();
     std::string verifyCode = src["verifyCode"].asString();
 
-    // 验证码校验
-    auto storedCode = RedisManagerPool::GetInstance().Get(CODE_PREFIX + email);
-    if (!storedCode.has_value() || storedCode != verifyCode) {
+    if (!CheckVerifyCode(email, verifyCode)) {
         LOG_WARN("[GateServer] ResetPassword failed, verify code not found or expired, email:%s", email.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::VERIFYCODE_NOT_FOUND_OR_EXPIRED);
         return;
@@ -215,33 +207,19 @@ void LogicSystem::HandleResetPassword(HttpConnPtr conn)
 
 void LogicSystem::HandleUserLogin(HttpConnPtr conn)
 {
-    auto& request = conn->GetRequest();
-    auto bodyStr = beast::buffers_to_string(request.body().data());
     LOG_INFO("[GateServer] UserLogin request");
 
     auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json"); // 更标准的 MIME
+    response.set(http::field::content_type, "application/json");
 
     Json::Value root;
-    Json::Reader reader;
     Json::Value src;
-
-    // 无论从哪个分支返回，统一写 HTTP 响应体
     Defer defer([&]() {
         beast::ostream(response.body()) << root.toStyledString();
     });
 
-    if (!reader.parse(bodyStr, src)) {
-        LOG_WARN("[GateServer] UserLogin failed, invalid json");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
-        return;
-    }
-
-    // 字段存在性 & 类型校验
-    if (!src.isMember("passwd") || !src["passwd"].isString() || !src.isMember("name") ||
-        !src["name"].isString()) {
-        LOG_WARN("[GateServer] UserLogin failed, missing or invalid fields");
-        root["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+    if (!ParseBody(conn, src, root, {"passwd", "name"})) {
+        LOG_WARN("[GateServer] UserLogin failed, invalid json or missing fields");
         return;
     }
     std::string name = src["name"].asString();

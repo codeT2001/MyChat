@@ -15,6 +15,8 @@ public:
     bool Connect(const std::string& host, uint16_t port);
     /* ---------- string ---------- */
     void Set(const std::string& key, const std::string& val);
+    // 带过期时间的写入：缓存类数据用，避免脏数据永久驻留
+    void SetEx(const std::string& key, const std::string& val, std::chrono::seconds ttl);
     std::optional<std::string> Get(const std::string& key);
 
     /* ---------- hash ---------- */
