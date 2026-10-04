@@ -77,9 +77,10 @@ flowchart TD
 | 10011/10012 | NOTIFY_AUTH_FRIEND_REQ/RSP | S→C | action, from_uid, to_uid（同意附对方资料） |
 | 10013/10014 | TEXT_CHAT_MSG_REQ/RSP | C→S | from_uid, to_uid, **text_array[{msg_id,content}]** |
 | 10015/10016 | NOTIFY_TEXT_CHAT_MSG_REQ/RSP | S→C | from_uid, to_uid, text_array（对端转发） |
+| 10017 | NOTIFY_KICK | S→C | error, reason（顶号踢下线通知，客户端收到后断开并退回登录页） |
 | 99999 | CHAT_HEARTBEAT | C→S | 空 body（客户端 30s 一次；服务端收到即连接存活） |
 
-> proto 中还定义了 `ReplyFriend` / `SendChatMsg` / `NotifyKickUser`，当前暂无业务调用（**踢下线功能未实现**）。
+> proto 中的 `NotifyKickUser` 已实现（顶号踢下线）：新登录绑定会话后，同节点旧会话直发 `NOTIFY_KICK`，跨节点走 `ChatService.NotifyKickUser` gRPC。服务端只发通知不强制关 socket，由客户端自行断开走正常清理链路。`ReplyFriend` / `SendChatMsg` 仍暂无业务调用。
 
 ### 好友认证字段约定
 

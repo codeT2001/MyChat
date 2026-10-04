@@ -157,11 +157,54 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     }
 
     auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
+    // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前），
+    // 否则取到的都是新登录自己的状态
+    auto oldServer = RedisManagerPool::GetInstance().Get(USER_SERVER_PREFIX + uid_str);
+    std::shared_ptr<CSession> oldLocalSession;
+    if (oldServer.has_value() && *oldServer == serverName) {
+        oldLocalSession = UserManager::GetInstance().GetSession(uid);
+    }
     RedisManagerPool::GetInstance().HIncrBy(LOGIN_COUNT, serverName, 1);
     RedisManagerPool::GetInstance().Set(USER_SERVER_PREFIX + uid_str, serverName);
     session->SetUserUid(uid);
     UserManager::GetInstance().SetUserSession(uid, session);
+    // 新会话绑定成功后再踢旧会话：旧会话断开清理时 RmvUserSession 校验
+    // 绑定的已不是自己，不会误删本次新登录的 Redis 状态
+    if (oldServer.has_value() && !oldServer->empty()) {
+        KickOldSession(uid, *oldServer, oldLocalSession);
+    }
     LOG_INFO("[LogicSystem] login success, uid:%d, name:%s", uid, userInfo->name.c_str());
+}
+
+void LogicSystem::KickOldSession(int32_t uid, const std::string& oldServer,
+    const std::shared_ptr<CSession>& oldLocalSession)
+{
+    Json::Value val;
+    val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    val["reason"] = "account logged in elsewhere";
+    auto kickMsg = val.toStyledString();
+
+    // 旧会话在本节点：直接发踢下线通知。
+    // 不强制服务端关 socket——客户端收到通知后自行断开，
+    // 走正常断开清理链路，避免异步写未刷出就被关闭
+    if (oldLocalSession) {
+        LOG_WARN("[LogicSystem] kick old session on self, uid:%d, sessionId:%u",
+            uid, oldLocalSession->GetSessionId());
+        oldLocalSession->SendMessage(kickMsg, static_cast<uint16_t>(MSG_IDS::NOTIFY_KICK));
+        return;
+    }
+    // 旧会话在其他节点：跨节点 gRPC 通知踢人。
+    // 旧节点已下线（残留路由键）时 RPC 会失败，忽略即可——
+    // 路由键已被本次登录覆盖，残留状态就此自愈
+    KickUserReq req;
+    req.set_uid(uid);
+    auto rsp = ChatGrpcClient::GetInstance().KickUser(oldServer, req);
+    if (rsp.error() != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
+        LOG_WARN("[LogicSystem] kick remote session failed (stale route?), uid:%d, old server:%s",
+            uid, oldServer.c_str());
+    } else {
+        LOG_WARN("[LogicSystem] kicked remote session, uid:%d, old server:%s", uid, oldServer.c_str());
+    }
 }
 
 void LogicSystem::RegisterHandleCallback()

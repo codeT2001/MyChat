@@ -321,7 +321,7 @@ service ChatService {  // ChatServer 节点间
 | 7 | PASSWORD_NOT_MATCH | 密码错误 |
 | 8 | UID_INVALID | 用户不存在/资料拉取失败 |
 | 9 | TOKEN_INVALID | token 无效 |
-| 10 | USER_ALREADY_LOGIN | 账号已在线，拒绝重复登录（Gate `/userLogin` 拦截） |
+| 10 | USER_ALREADY_LOGIN | （保留值，现不使用）已改为顶号模式：重复登录自动踢旧会话 |
 
 ---
 

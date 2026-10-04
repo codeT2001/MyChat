@@ -5,7 +5,12 @@
 # ==============================================================================
 
 # --- 依赖查找（与 server 端一致） ---
-find_package(Protobuf CONFIG REQUIRED)
+# protobuf 优先 CONFIG 模式（源码安装），发行版包（如 Ubuntu libprotobuf-dev）
+# 只提供 module 模式，找不到 CONFIG 时回退，两种环境都能构建
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED)
+endif()
 find_package(gRPC   CONFIG REQUIRED)
 find_package(Boost  REQUIRED COMPONENTS filesystem)
 find_package(Threads REQUIRED)

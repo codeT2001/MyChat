@@ -93,7 +93,7 @@ service ChatService {                                              // ChatServer
   rpc SendChatMsg(SendChatMsgReq) returns (SendChatMsgRsp);         // 已定义，暂无调用
   rpc NotifyFriendAccepted(FriendAcceptedReq) returns (FriendAcceptedRsp);  // 已实现
   rpc NotifyTextChatMsg(TextChatMsgReq) returns (TextChatMsgRsp);   // 已实现
-  rpc NotifyKickUser(KickUserReq) returns (KickUserRsp);            // 已定义，暂无调用
+  rpc NotifyKickUser(KickUserReq) returns (KickUserRsp);            // 已实现（顶号踢下线）
 }
 ```
 
@@ -110,7 +110,7 @@ service ChatService {                                              // ChatServer
 
 > 验证码 key `code_{email}` 由 Node.js VerifyServer 写入（TTL 600 秒），仅在 GateServer 读取，故前缀常量只定义在 GateServer 与 VerifyServer 中。
 >
-> ⚠️ **`userver_{uid}` 目前不设 TTL**：若进程异常退出未清理，该键会残留，后续跨服路由可能指向已下线节点。建议加 TTL 或用定期巡检兜底。
+> ⚠️ **`userver_{uid}` 目前不设 TTL**：若进程异常退出未清理，该键会残留，跨服路由可能短暂指向已下线节点（消息推送按"用户不在线"丢弃，无实质影响）。残留键会在用户下次登录时被顶号流程覆盖，实现自愈；彻底治理仍建议加 TTL 并由心跳续期。
 
 ### 好友申请状态 / 认证动作
 

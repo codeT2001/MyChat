@@ -124,6 +124,29 @@ Status ChatServiceImpl::NotifyTextChatMsg(ServerContext* context, const TextChat
     return Status::OK;
 }
 
+Status ChatServiceImpl::NotifyKickUser(ServerContext* context, const KickUserReq* request, KickUserRsp* reply)
+{
+    auto uid = request->uid();
+    reply->set_uid(uid);
+    auto session = UserManager::GetInstance().GetSession(uid);
+    // 用户不在线（路由键残留、会话已断）视为无需处理，返回成功
+    if (!session) {
+        LOG_INFO("[ChatServiceImpl] NotifyKickUser, uid not on this server, uid:%d", uid);
+        reply->set_error(static_cast<int32_t>(ErrorCodes::SUCCESS));
+        return Status::OK;
+    }
+    // 只发踢下线通知，不强制关 socket：客户端收到后自行断开，
+    // 走正常断开清理链路（此时它已被新登录顶掉，不会误删 Redis 状态）；
+    // 客户端僵死不读时由 TCP 超时兜底
+    Json::Value val;
+    val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    val["reason"] = "account logged in elsewhere";
+    session->SendMessage(val.toStyledString(), static_cast<uint16_t>(MSG_IDS::NOTIFY_KICK));
+    LOG_WARN("[ChatServiceImpl] kicked user, uid:%d, sessionId:%u", uid, session->GetSessionId());
+    reply->set_error(static_cast<int32_t>(ErrorCodes::SUCCESS));
+    return Status::OK;
+}
+
 bool ChatServiceImpl::GetBaseInfo(const std::string& baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo)
 {
 	auto info = RedisManagerPool::GetInstance().Get(baseKey);

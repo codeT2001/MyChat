@@ -38,7 +38,8 @@ public:
     FriendAcceptedRsp NotifyFriendAccepted(const std::string& serverName, const FriendAcceptedReq& req);
     TextChatMsgRsp NotifyTextChatMsg(const std::string& serverName, const TextChatMsgReq& req,
         const Json::Value& rtvalue);
-    // KickUserRsp KickUser(const std::string& serverIp, const KickUserReq& req);
+    // 顶号：通知 oldServer 踢掉 uid 的旧会话
+    KickUserRsp KickUser(const std::string& serverName, const KickUserReq& req);
     ~ChatGrpcClient();
 private:
     ChatGrpcClient();

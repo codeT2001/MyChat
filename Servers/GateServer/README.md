@@ -150,25 +150,17 @@ sequenceDiagram
         G-->>C: error=7 PASSWORD_NOT_MATCH
     else 密码正确
         DB-->>G: uid
-        G->>R: GET userver_uid（防重复登录）
-        alt 已有路由记录（账号在线）
-            R-->>G: 节点名
-            G-->>C: error=10 USER_ALREADY_LOGIN（附 online_server）
-        else 未在线
-            R-->>G: 无
-            G->>S: gRPC GetChatServer(uid)
-            Note over S: 选取 login_count 最小的节点<br/>（后台定时刷新，详见 StatusServer README）
-            S->>R: SET utoken_uid = UUID token
-            S-->>G: {host, port, token}
-            G-->>C: {error:0, host, port, token, uid}
-            Note over C,CS: 客户端持 token 向 host:port 发起 TCP 登录
-        end
+        G->>R: GET userver_uid（检测旧会话，顶号用）
+        G->>S: gRPC GetChatServer(uid)
+        Note over S: 选取 login_count 最小的节点<br/>（后台定时刷新，详见 StatusServer README）
+        S->>R: SET utoken_uid = UUID token
+        S-->>G: {host, port, token}
+        G-->>C: {error:0, host, port, token, uid}
+        Note over C,CS: 客户端持 token 向 host:port 发起 TCP 登录<br/>ChatServer 绑定新会话后踢掉旧会话（顶号）
     end
 ```
 
-> **防重复登录的已知缺陷**：该机制依赖 Redis 路由键 `userver_{uid}`——由 ChatServer 在 TCP 登录成功后写入、会话正常断开时删除。但该键**没有 TTL**，且 ChatServer 进程崩溃/被 kill 时不会走清理逻辑。极端情况下用户会被永久判定为"已登录"而无法再登录，只能人工 `DEL userver_{uid}`。
->
-> **建议**：给 `userver_{uid}` 加 TTL（如 5 分钟）并由 ChatServer 定期续期，或改用同时校验 `login_count` 中节点计数的双重判断。
+> **顶号策略**：登录不再因"账号已在线"被拒绝。检测到 `userver_{uid}` 路由记录时 GateServer 正常放行，由 ChatServer 在 TCP 登录时踢掉旧会话（同节点直发 `NOTIFY_KICK`，跨节点走 `ChatService.NotifyKickUser` gRPC）。旧节点已下线导致的残留路由键也会被本次登录覆盖，实现自愈。
 
 ## 开发者注意
 

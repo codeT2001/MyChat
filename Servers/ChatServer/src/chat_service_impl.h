@@ -32,6 +32,8 @@ public:
     Status NotifyAddFriend(ServerContext* context, const AddFriendReq* request, AddFriendRsp* reply) override;
     Status NotifyFriendAccepted(ServerContext* context, const FriendAcceptedReq* request, FriendAcceptedRsp* reply) override;
     Status NotifyTextChatMsg(ServerContext* context, const TextChatMsgReq* request, TextChatMsgRsp* reply) override;
+    // 顶号：其他节点登录同一账号时，通知本节点踢掉该 uid 的旧会话
+    Status NotifyKickUser(ServerContext* context, const KickUserReq* request, KickUserRsp* reply) override;
     bool GetBaseInfo(const std::string& baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo);
 private:
 

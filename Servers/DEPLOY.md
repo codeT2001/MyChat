@@ -270,7 +270,7 @@ curl -i http://127.0.0.1:9090/
 | CMake 报版本过低（要求 3.20） | `cmake --version`；Ubuntu 20.04 需升级 CMake |
 | 编译找不到 `chat/xxx.h` | 确认在 `Servers/` 下构建后重新 `cmake -S . -B build -G Ninja` |
 | 注册失败 / uid 异常 | 检查是否漏建 **`user_id` 发号器表** |
-| 登录提示 USER_ALREADY_LOGIN(10) | Redis 中残留 `userver_{uid}`（上次会话未正常清理），确认无人在线后 `redis-cli DEL userver_<uid>` |
+| 登录提示 USER_ALREADY_LOGIN(10) | 旧版本行为；现已是**顶号模式**——检测到旧会话会自动踢下线，若仍出现此提示说明服务端为旧版本，需重新构建部署 |
 | 登录成功但客户端连不上聊天节点 | `StatusServer/config.ini` 的 ChatServer Host 不可达（本地部署需改 `127.0.0.1`） |
 | 获取验证码失败 | 查 `verify_server.log`：QQ 邮箱授权码是否过期、SMTP 是否被限流；Redis 中 `code_{email}` 是否已有值 |
 | GateServer 启动即退出 | 9090 端口占用，或 [GateServer/config.ini](GateServer/config.ini) 中 MySQL/Redis 配置不可达 |

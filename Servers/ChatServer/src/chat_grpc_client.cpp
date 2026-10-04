@@ -144,4 +144,36 @@ TextChatMsgRsp ChatGrpcClient::NotifyTextChatMsg(const std::string& serverName, 
     }
     return rsp;
 }
+
+KickUserRsp ChatGrpcClient::KickUser(const std::string& serverName, const KickUserReq& req)
+{
+    KickUserRsp rsp;
+    rsp.set_error(static_cast<int32_t>(ErrorCodes::SUCCESS));
+    rsp.set_uid(req.uid());
+
+    auto iter = pool_.find(serverName);
+    if (iter == pool_.end()) {
+        LOG_ERROR("[ChatGrpcClient] KickUser failed, peer server not configured:%s", serverName.c_str());
+        rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
+        return rsp;
+    }
+
+    auto& pool = iter->second;
+    auto stub = pool->GetStub();
+    if (!stub) {
+        LOG_ERROR("[ChatGrpcClient] KickUser failed, no available stub, server:%s", serverName.c_str());
+        rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
+        return rsp;
+    }
+    ClientContext context;
+    Status status = stub->NotifyKickUser(&context, req, &rsp);
+    pool->PutStub(std::move(stub));
+
+    if (!status.ok()) {
+        LOG_ERROR("[ChatGrpcClient] KickUser rpc failed, server:%s, error:%s",
+            serverName.c_str(), status.error_message().c_str());
+        rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
+    }
+    return rsp;
+}
 } // namespace P1

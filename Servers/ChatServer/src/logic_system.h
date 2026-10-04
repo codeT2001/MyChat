@@ -38,6 +38,10 @@ private:
     void HandleAuthFriend(std::shared_ptr<CSession>, const uint16_t msgId, const std::string& msg);
     void HandleTextChatMsg(std::shared_ptr<CSession>, const uint16_t msgId, const std::string& msg);
     bool GetBaseUserInfo(const std::string baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo);
+    // 顶号：踢掉 uid 的旧会话。oldServer 为 Redis 中的旧路由节点名，
+    // 与本节点相同则直接发踢下线通知，否则走跨节点 gRPC
+    void KickOldSession(int32_t uid, const std::string& oldServer,
+        const std::shared_ptr<CSession>& oldLocalSession);
     LogicSystem();
     std::queue<std::shared_ptr<LogicNode>> msgQue_;
     std::mutex msgMtx_;

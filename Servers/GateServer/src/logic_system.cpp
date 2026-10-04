@@ -256,16 +256,14 @@ void LogicSystem::HandleUserLogin(HttpConnPtr conn)
     root["uid"] = userInfo.uid;
     LOG_INFO("[GateServer] UserLogin password verified, uid:%d, name:%s", userInfo.uid, name.c_str());
 
-    // 防重复登录：该用户已有路由记录（说明已在线）则直接拒绝，
-    // 不再颁发新 token。路由键由 ChatServer 在会话断开时清理
+    // 顶号策略：检测到已有会话路由时不拒绝登录，正常颁发 token 并分配节点，
+    // 由 ChatServer 在 TCP 登录时踢掉旧会话。
+    // 残留的路由键（上次会话未正常清理）也会在 ChatServer 重新写入时被覆盖，实现自愈。
     auto uidStr = std::to_string(userInfo.uid);
     auto onlineServer = RedisManagerPool::GetInstance().Get(USER_SERVER_PREFIX + uidStr);
     if (onlineServer.has_value() && !onlineServer->empty()) {
-        LOG_WARN("[GateServer] UserLogin rejected, user already online, uid:%d, server:%s",
+        LOG_INFO("[GateServer] UserLogin kick mode, user already online, uid:%d, old server:%s",
             userInfo.uid, onlineServer->c_str());
-        root["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
-        root["online_server"] = *onlineServer;
-        return;
     }
 
     auto reply = StatusGrpcClient::GetInstance().GetChatServer(userInfo.uid);
