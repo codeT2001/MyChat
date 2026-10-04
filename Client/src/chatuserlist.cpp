@@ -3,18 +3,31 @@
 #include "userwidget.h"
 #include "usermanager.h"
 #include "userdata.h"
+#include "utils.h"
 #include <QScrollBar>
+#include <QStyle>
+#include <QHBoxLayout>
+
+namespace {
+// 条目卡片四周留白：卡片不直接铺满列表行，露出列表底色形成圆角卡片效果
+constexpr int kCardMarginH = 6;
+constexpr int kCardMarginV = 3;
+
+// 包一层带留白的容器，UserWidget 圆角卡片居中其中
+QWidget *WrapItemWidget(QWidget *inner)
+{
+    auto *wrap = new QWidget();
+    auto *lay = new QHBoxLayout(wrap);
+    lay->setContentsMargins(kCardMarginH, kCardMarginV, kCardMarginH, kCardMarginV);
+    lay->addWidget(inner);
+    return wrap;
+}
+} // namespace
 #include <QDebug>
 #include <QEvent>
 #include <QMovie>
 #include <QTimer>
 #include <QLabel>
-#include <QRandomGenerator>
-
-namespace {
-const std::vector<QString> heads = {":/images/head_1.jpg", ":/images/head_2.jpg", ":/images/head_3.jpg",
-                                    ":/images/head_4.jpg", ":/images/head_5.jpg"};
-}
 
 ChatUserList::ChatUserList(QWidget *parent) : QListWidget(parent)
 {
@@ -68,7 +81,7 @@ void ChatUserList::LoadMoreUsers()
     QListWidgetItem *item = new QListWidgetItem(this);
     this->setItemWidget(item, loadingLabel);
 
-    item->setSizeHint(QSize(250, 70));
+    item->setSizeHint(QSize(250, 70 + 2 * kCardMarginV)); // 与用户条目等高，配合 setUniformItemSizes
     item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
     movie->start();
 
@@ -101,16 +114,13 @@ void ChatUserList::AddUserList()
             continue;
         }
 
-        int randomValue = QRandomGenerator::global()->bounded(100);
-        int head_i = randomValue % heads.size();
-
         auto *userWidget = new UserWidget();
-        userWidget->SetInfo(e->name_, heads[head_i], e->last_msg_);
+        userWidget->SetInfo(e->name_, Utils::ResolveIcon(e->icon_), e->last_msg_);
         QListWidgetItem *item = new QListWidgetItem;
-        item->setSizeHint(userWidget->sizeHint());
+        item->setSizeHint(QSize(250, userWidget->sizeHint().height() + 2 * kCardMarginV));
         item->setData(Qt::UserRole, e->uid_); // uid 挂在 item 上，点击时反查
         this->addItem(item);
-        this->setItemWidget(item, userWidget);
+        this->setItemWidget(item, WrapItemWidget(userWidget));
         chatItemsAdded_.insert(e->uid_, item);
     }
     this->update();
@@ -122,17 +132,30 @@ void ChatUserList::InsertUserItem(std::shared_ptr<FriendInfo> info)
         return;
     }
 
-    int randomValue = QRandomGenerator::global()->bounded(100);
-    int head_i = randomValue % heads.size();
-
     auto *userWidget = new UserWidget();
-    userWidget->SetInfo(info->name_, heads[head_i], info->last_msg_);
+    userWidget->SetInfo(info->name_, Utils::ResolveIcon(info->icon_), info->last_msg_);
     QListWidgetItem *item = new QListWidgetItem;
-    item->setSizeHint(userWidget->sizeHint());
+    item->setSizeHint(QSize(250, userWidget->sizeHint().height() + 2 * kCardMarginV));
     item->setData(Qt::UserRole, info->uid_); // uid 挂在 item 上，点击时反查
     this->insertItem(0, item);
-    this->setItemWidget(item, userWidget);
+    this->setItemWidget(item, WrapItemWidget(userWidget));
     chatItemsAdded_.insert(info->uid_, item);
+}
+
+UserWidget *ChatUserList::FindItemWidget(QListWidgetItem *item) const
+{
+    if (!item) {
+        return nullptr;
+    }
+    // 条目 widget 外包了一层留白容器，兼容直接挂载和包裹挂载两种情况
+    QWidget *w = this->itemWidget(item);
+    if (!w) {
+        return nullptr;
+    }
+    if (auto *inner = qobject_cast<UserWidget *>(w)) {
+        return inner;
+    }
+    return w->findChild<UserWidget *>();
 }
 
 void ChatUserList::SetItemRedPoint(int uid, bool show)
@@ -140,11 +163,7 @@ void ChatUserList::SetItemRedPoint(int uid, bool show)
     if (!chatItemsAdded_.contains(uid)) {
         return;
     }
-    auto *item = chatItemsAdded_.value(uid);
-    if (!item) {
-        return;
-    }
-    auto *widget = qobject_cast<UserWidget *>(this->itemWidget(item));
+    auto *widget = FindItemWidget(chatItemsAdded_.value(uid));
     if (widget) {
         widget->SetShowRedPoint(show);
     }
@@ -167,7 +186,27 @@ void ChatUserList::SlotItemClicked(QListWidgetItem *item)
     }
     int uid = uidVar.toInt();
     ClearItemRedPoint(uid);
+    UpdateSelection(item);
     emit SigChatItemClicked(uid);
+}
+
+void ChatUserList::UpdateSelection(QListWidgetItem *clicked)
+{
+    // 条目 widget 自身不透明且带圆角，会盖住 ::item 的方形选中背景，
+    // 因此选中态改由 widget 的 selected 动态属性驱动 QSS
+    for (auto it = chatItemsAdded_.cbegin(); it != chatItemsAdded_.cend(); ++it) {
+        auto *widget = FindItemWidget(it.value());
+        if (!widget) {
+            continue;
+        }
+        bool selected = (it.value() == clicked);
+        if (widget->property("selected").toBool() == selected) {
+            continue;
+        }
+        widget->setProperty("selected", selected);
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+    }
 }
 
 bool ChatUserList::eventFilter(QObject *watched, QEvent *event)

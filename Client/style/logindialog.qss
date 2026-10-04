@@ -1,36 +1,100 @@
 /* ========== LoginDialog 登录对话框 ========== */
+/* 设计规范见 style/_design_tokens.qss */
+
 QDialog#LoginDialog {
-   background-color:rgb(255,255,255)
+    background-color: #f8fafc;
 }
 
+/* ---------- 错误提示区 ---------- */
 QLabel#loginErrTip {
-   background-color:rgb(255,255,255)
+    background-color: transparent;
+    color: #dc2626;
+    font-size: 12px;
 }
 
-#forgetLabel[state='hover']{
-   color: blue;
+/* ---------- 输入框 ---------- */
+QDialog#LoginDialog QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #1e293b;
+    font-size: 13px;
+    selection-background-color: #3b82f6;
 }
 
-#forgetLabel[state='normal']{
-   color: black;
+QDialog#LoginDialog QLineEdit:hover {
+    border-color: #cbd5e1;
 }
 
-#loginPassLb[state='visible_hover']{
-   border-image: url(:/images/visible_hover.png);
+QDialog#LoginDialog QLineEdit:focus {
+    border: 2px solid #3b82f6;
+    padding: 4px 9px; /* 补偿 focus 边框加宽，避免内容抖动 */
 }
 
-#loginPassLb[state='unvisible']{
-   border-image: url(:/images/unvisible.png);
+/* ---------- 主按钮：登录 ---------- */
+QPushButton#loginBtn {
+    background-color: #3b82f6;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: bold;
 }
 
-#loginPassLb[state='unvisible_hover']{
-   border-image: url(:/images/unvisible_hover.png);
+QPushButton#loginBtn:hover {
+    background-color: #2563eb;
 }
 
-#loginPassLb[state='visible']{
-   border-image: url(:/images/visible.png);
+QPushButton#loginBtn:pressed {
+    background-color: #1d4ed8;
 }
 
-#loginPassLb[state='visible_hover']{
-   border-image: url(:/images/visible_hover.png);
+QPushButton#loginBtn:disabled {
+    background-color: #d1d5db;
+}
+
+/* ---------- 次级按钮：注册 ---------- */
+QPushButton#registerBtn {
+    background-color: #ffffff;
+    color: #3b82f6;
+    border: 1px solid #3b82f6;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+}
+
+QPushButton#registerBtn:hover {
+    background-color: #eff6ff;
+}
+
+QPushButton#registerBtn:pressed {
+    background-color: #dbeafe;
+}
+
+/* ---------- 文字链接：忘记密码 ---------- */
+#forgetLabel[state='hover'] {
+    color: #2563eb;
+}
+
+#forgetLabel[state='normal'] {
+    color: #64748b;
+}
+
+/* ---------- 密码可见性切换图标 ---------- */
+#loginPassLb[state='visible_hover'] {
+    border-image: url(:/images/visible_hover.png);
+}
+
+#loginPassLb[state='unvisible'] {
+    border-image: url(:/images/unvisible.png);
+}
+
+#loginPassLb[state='unvisible_hover'] {
+    border-image: url(:/images/unvisible_hover.png);
+}
+
+#loginPassLb[state='visible'] {
+    border-image: url(:/images/visible.png);
 }

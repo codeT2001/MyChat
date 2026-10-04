@@ -22,6 +22,10 @@ QPushButton#addFriendBtn {
     color: white;
     border: none;
     border-radius: 6px;
+    font: bold 13px "Microsoft YaHei";
+    padding: 0 16px;
+    min-height: 28px;
+    min-width: 72px;
 }
 
 QPushButton#addFriendBtn:hover {

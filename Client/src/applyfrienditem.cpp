@@ -31,12 +31,8 @@ ApplyFriendItem::~ApplyFriendItem()
 void ApplyFriendItem::SetInfo(std::shared_ptr<ApplyInfo> info)
 {
     info_ = info;
-    // 加载图片
-    QPixmap pixmap(info_->icon_);
-
-    // 设置图片自动缩放
-    ui->iconLb->setPixmap(pixmap.scaled(ui->iconLb->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    ui->iconLb->setScaledContents(true);
+    // 加载头像：ResolveIcon 统一解析协议 icon 字段，圆形化展示
+    ui->iconLb->setPixmap(Utils::RoundedAvatar(info_->icon_, ui->iconLb->size()));
 
     ui->nameLb->setText(info_->name_);
     ui->msgLb->setText(info_->desc_);

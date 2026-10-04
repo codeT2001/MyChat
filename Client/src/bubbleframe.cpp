@@ -6,9 +6,10 @@ namespace {
 static constexpr int TRIANGLE_WIDTH = 8;
 static constexpr int TRIANGLE_OFFSET = 12;
 static constexpr int TRIANGLE_SIZE = 10;
-static constexpr int ROUND_RADIUS = 5;
-static constexpr QColor SELF_BUBBLE_COLOR(158, 234, 106);
-static constexpr QColor OTHER_BUBBLE_COLOR(255, 255, 255);
+static constexpr int ROUND_RADIUS = 8;
+// 与 _design_tokens 对齐：自己=品牌蓝，对方=白卡片色
+static constexpr QColor SELF_BUBBLE_COLOR(59, 130, 246);    // #3b82f6
+static constexpr QColor OTHER_BUBBLE_COLOR(255, 255, 255);  // #ffffff
 } // namespace
 BubbleFrame::BubbleFrame(bool self, QWidget *parent) : QFrame{parent}, self_{self}, margin_{3}
 {

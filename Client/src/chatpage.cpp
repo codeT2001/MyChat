@@ -17,18 +17,13 @@
 #include "picturebubble.h"
 
 namespace {
-constexpr const char *kDefaultHead = ":/images/head_1.jpg";
 constexpr int kMaxTextBatchSize = 1024; // 单批文本消息总长度上限
 constexpr int kMaxSingleMsgLen = 1024;  // 单条消息内容长度上限
 
-// 加载头像，路径为空或加载失败时回退默认头像
+// 加载头像：统一经 Utils::ResolveIcon 解析协议 icon 字段，圆形化（ChatItemBase 头像固定 42x42）
 QPixmap LoadIconOrDefault(const QString &icon)
 {
-    QPixmap p(icon);
-    if (p.isNull()) {
-        p.load(kDefaultHead);
-    }
-    return p;
+    return Utils::RoundedAvatar(icon, QSize(42, 42));
 }
 } // namespace
 
@@ -129,20 +124,17 @@ void ChatPage::OnSendMsgBtnClicked()
         LOG_WARN() << "send message failed, no friend selected";
         return;
     }
-
-    auto selfInfo = UserManager::GetInstance().GetUserInfo();
+    auto& uMgr = UserManager::GetInstance();
+    auto selfInfo = uMgr.GetUserInfo();
     if (!selfInfo) {
         LOG_WARN() << "send message failed, user info is null";
         return;
     }
-    QString selfName = UserManager::GetInstance().GetName();
-    QString selfIcon = UserManager::GetInstance().GetIcon();
-    if (selfIcon.isEmpty()) {
-        selfIcon = kDefaultHead;
-    }
-    int selfUid = UserManager::GetInstance().GetUid();
+    QString selfName = uMgr.GetName();
+    QString selfIcon = uMgr.GetIcon();
+    int selfUid = uMgr.GetUid();
 
-    auto friendInfo = UserManager::GetInstance().GetFriendById(currentUid_);
+    auto friendInfo = uMgr.GetFriendById(currentUid_);
     if (!friendInfo) {
         LOG_WARN() << "send message failed, friend not found, uid =" << currentUid_;
         return;
@@ -164,7 +156,7 @@ void ChatPage::OnSendMsgBtnClicked()
 
         ChatItemBase *item = new ChatItemBase(true);
         item->SetUserName(selfName);
-        item->SetUserIcon(QPixmap(selfIcon));
+        item->SetUserIcon(LoadIconOrDefault(selfIcon));
         QWidget *bubble = nullptr;
 
         if (type == "text") {

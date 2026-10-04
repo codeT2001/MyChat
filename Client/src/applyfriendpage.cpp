@@ -9,12 +9,6 @@
 #include "log.h"
 #include <QPaintEvent>
 #include <QPainter>
-#include <QRandomGenerator>
-
-namespace {
-const std::vector<QString> heads = {":/images/head_1.jpg", ":/images/head_2.jpg", ":/images/head_3.jpg",
-                                    ":/images/head_4.jpg", ":/images/head_5.jpg"};
-} // namespace
 
 ApplyFriendPage::ApplyFriendPage(QWidget *parent) : QWidget(parent), ui(new Ui::ApplyFriendPage)
 {
@@ -39,12 +33,10 @@ void ApplyFriendPage::AddNewApply(std::shared_ptr<AddFriendApply> apply)
     if (!apply) {
         return;
     }
-    // 先模拟头像随机，以后头像资源增加资源服务器后再显示
-    int randomValue = QRandomGenerator::global()->bounded(100); // 生成0到99之间的随机整数
-    int head_i = randomValue % heads.size();
+    // 头像直接使用服务端下发的 icon（Utils::ResolveIcon 统一解析并兜底）
     auto *apply_item = new ApplyFriendItem();
     auto apply_info =
-        std::make_shared<ApplyInfo>(apply->uid_, apply->name_, apply->desc_, heads[head_i], apply->nick_, 0, 0);
+        std::make_shared<ApplyInfo>(apply->uid_, apply->name_, apply->desc_, apply->icon_, apply->nick_, 0, 0);
     apply_item->SetInfo(apply_info);
     QListWidgetItem *item = new QListWidgetItem;
     item->setSizeHint(apply_item->sizeHint());
@@ -68,10 +60,8 @@ void ApplyFriendPage::LoadApplyList()
 {
     auto apply_list = UserManager::GetInstance().GetApplyList();
     for (auto &[k, apply] : apply_list) {
-        int randomValue = QRandomGenerator::global()->bounded(100);
-        int head_i = randomValue % heads.size();
         auto *apply_item = new ApplyFriendItem();
-        apply->SetIcon(heads[head_i]);
+        apply->SetIcon(Utils::ResolveIcon(apply->icon_));
         apply_item->SetInfo(apply);
         QListWidgetItem *item = new QListWidgetItem;
         item->setSizeHint(apply_item->sizeHint());

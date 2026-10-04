@@ -1,8 +1,94 @@
 /* ========== ResetDialog 重置密码对话框 ========== */
+/* 设计规范见 style/_design_tokens.qss */
+
 QDialog#ResetDialog {
-   background-color:rgb(255,255,255)
+    background-color: #f8fafc;
 }
 
+/* ---------- 错误提示区 ---------- */
 QLabel#resetErrTip {
-   background-color:rgb(255,255,255)
+    background-color: transparent;
+    color: #dc2626;
+    font-size: 12px;
+}
+
+/* ---------- 输入框 ---------- */
+QDialog#ResetDialog QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #1e293b;
+    font-size: 13px;
+    selection-background-color: #3b82f6;
+}
+
+QDialog#ResetDialog QLineEdit:hover {
+    border-color: #cbd5e1;
+}
+
+QDialog#ResetDialog QLineEdit:focus {
+    border: 2px solid #3b82f6;
+    padding: 4px 9px; /* 补偿 focus 边框加宽，避免内容抖动 */
+}
+
+/* ---------- 主按钮：确认 ---------- */
+QPushButton#sureBtn {
+    background-color: #3b82f6;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QPushButton#sureBtn:hover {
+    background-color: #2563eb;
+}
+
+QPushButton#sureBtn:pressed {
+    background-color: #1d4ed8;
+}
+
+QPushButton#sureBtn:disabled {
+    background-color: #d1d5db;
+}
+
+/* ---------- 次级按钮：获取验证码 ---------- */
+TimerButton#getCode {
+    background-color: #ffffff;
+    color: #3b82f6;
+    border: 1px solid #3b82f6;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 13px;
+}
+
+TimerButton#getCode:hover {
+    background-color: #eff6ff;
+}
+
+TimerButton#getCode:pressed {
+    background-color: #dbeafe;
+}
+
+TimerButton#getCode:disabled {
+    color: #94a3b8;
+    border-color: #e2e8f0;
+    background-color: #f1f5f9;
+}
+
+/* ---------- 文字链接：返回 ---------- */
+QPushButton#backBtn {
+    background-color: transparent;
+    color: #3b82f6;
+    border: none;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+QPushButton#backBtn:hover {
+    color: #2563eb;
+    text-decoration: underline;
 }

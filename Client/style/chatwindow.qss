@@ -1,6 +1,6 @@
 /* ========== ChatWindow 主窗口 ========== */
 #ChatWindow {
-    background-color: #e5e7eb;
+    background-color: #f1f5f9;
 }
 
 /* ========== 侧边栏 ========== */
@@ -97,20 +97,22 @@
     margin: 0px;
 }
 
+/* 条目 widget 不透明且自带圆角卡片样式，::item 的方形 hover/选中背景会被盖住，
+   改由 UserWidget 自身的 :hover 与 selected 属性渲染（见 userwidget.qss） */
 #usersList::item:selected {
-    background-color: #eff6ff;
+    background-color: transparent;
     border: none;
     outline: none;
 }
 
 #usersList::item:hover {
-    background-color: #f1f5f9;
+    background-color: transparent;
     border: none;
     outline: none;
 }
 
 #searchList {
-    background-color: rgb(247,247,248);
+    background-color: #f8fafc;
     border: none;
     outline: none;
     padding: 0px;
@@ -118,13 +120,13 @@
 }
 
 #searchList::item:selected {
-    background-color: #d3d7d4;
+    background-color: #dbeafe;
     border: none;
     outline: none;
 }
 
 #searchList::item:hover {
-    background-color: rgb(206,207,208);
+    background-color: #f1f5f9;
     border: none;
     outline: none;
 }

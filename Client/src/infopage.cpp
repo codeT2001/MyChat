@@ -15,12 +15,6 @@
 #include <QCursor>
 #include <QEvent>
 #include <QFont>
-#include <QRandomGenerator>
-
-namespace {
-const std::vector<QString> heads = {":/images/head_1.jpg", ":/images/head_2.jpg", ":/images/head_3.jpg",
-                                    ":/images/head_4.jpg", ":/images/head_5.jpg"};
-} // namespace
 
 InfoPage::InfoPage(QWidget *parent) : QWidget(parent), ui(new Ui::InfoPage)
 {
@@ -92,15 +86,8 @@ void InfoPage::FillContent(int uid,
 {
     uid_ = uid;
 
-    // 头像：优先使用资料中的 icon，为空或加载失败时回退随机头像，与列表保持一致
-    QPixmap pixmap(icon);
-    if (pixmap.isNull()) {
-        int head_i = QRandomGenerator::global()->bounded(100) % heads.size();
-        pixmap.load(heads[head_i]);
-    }
-    ui->iconLb->setPixmap(
-        pixmap.scaled(ui->iconLb->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    ui->iconLb->setScaledContents(true);
+    // 头像：ResolveIcon 统一解析协议 icon 字段，圆形化展示
+    ui->iconLb->setPixmap(Utils::RoundedAvatar(icon, ui->iconLb->size()));
 
     // 顶部大字显示昵称，昵称为空时回退用户名
     ui->nameLb->setText(nick.isEmpty() ? name : nick);

@@ -13,7 +13,7 @@
 
 /* ========== 中间聊天列表区域 ========== */
 #chatListWidget {
-    background-color: #f0f0f0;
+    background-color: #f8fafc;
     border : none;
 }
 
@@ -22,14 +22,14 @@
 }
 
 #chatBg {
-    background-color: #f0f0f0;
+    background-color: #f8fafc;
 }
 
 /* ========== 工具栏 ========== */
 #toolWidget {
     background-color: #f8fafc;
     border-radius: 6px;
-    border-bottom: 0.5px solid #ececec;
+    border-bottom: 1px solid #e2e8f0;
 }
 
 /* ========== 工具栏按钮 ========== */

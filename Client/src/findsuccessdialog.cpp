@@ -33,9 +33,7 @@ FindSuccessDialog::~FindSuccessDialog()
 
 void FindSuccessDialog::SetSearchInfo(std::shared_ptr<SearchInfo> info)
 {
-    QPixmap pix(":/images/head_1.jpg");
-    pix = pix.scaled(ui->iconLb->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    ui->iconLb->setPixmap(pix);
+    ui->iconLb->setPixmap(Utils::RoundedAvatar(info->icon_, ui->iconLb->size()));
     ui->nameLb->setText(info->name_);
     info_ = info;
 }

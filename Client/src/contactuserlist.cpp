@@ -1,6 +1,5 @@
 #include "contactuserlist.h"
 #include <QEvent>
-#include <QRandomGenerator>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QMovie>
@@ -11,11 +10,9 @@
 #include "friendservice.h"
 #include "userdata.h"
 #include "usermanager.h"
+#include "utils.h"
 #include "log.h"
 namespace {
-
-const std::vector<QString> heads = {":/images/head_1.jpg", ":/images/head_2.jpg", ":/images/head_3.jpg",
-                                    ":/images/head_4.jpg", ":/images/head_5.jpg"};
 
 // 条目身份数据挂在 QListWidgetItem 上（widget 为纯视图）：
 // kItemTypeRole 存 ListItemType，kItemUidRole 存联系人 uid（仅联系人条目有效）
@@ -68,15 +65,10 @@ void ContactUserList::InitList()
     // 默认设置新的朋友申请条目被选中
     this->setCurrentItem(add_item);
 
-    // "自己"入口：显示当前登录用户资料（头像为空时回退默认头像）
+    // "自己"入口：显示当前登录用户资料（ResolveIcon 统一解析并兜底默认头像）
     auto self = UserManager::GetInstance().GetUserInfo();
     QString selfName = self && !self->name_.isEmpty() ? self->name_ : tr("我");
-    QString selfIcon;
-    if (self && !self->icon_.isEmpty()) {
-        selfIcon = self->icon_;
-    } else {
-        selfIcon = heads[0];
-    }
+    QString selfIcon = self ? Utils::ResolveIcon(self->icon_) : Utils::ResolveIcon(QString());
     auto *selfItem = new ContactUserItem();
     selfItem->setObjectName("self_user_item");
     selfItem->SetInfo(selfName, selfIcon);
@@ -105,10 +97,8 @@ void ContactUserList::AddContactList()
             continue;
         }
         addedUids_.insert(e->uid_);
-        int randomValue = QRandomGenerator::global()->bounded(100);
-        int head_i = randomValue % heads.size();
         auto *userItem = new ContactUserItem();
-        userItem->SetInfo(e->name_, heads[head_i]);
+        userItem->SetInfo(e->name_, Utils::ResolveIcon(e->icon_));
         QListWidgetItem *item = new QListWidgetItem;
         item->setSizeHint(userItem->sizeHint());
         // 身份由 item role 表达：联系人条目 + uid
@@ -252,11 +242,8 @@ void ContactUserList::SlotFriendAuth(std::shared_ptr<FriendInfo> info)
     }
     addedUids_.insert(info->uid_);
 
-    int randomValue = QRandomGenerator::global()->bounded(100); // 生成0到99之间的随机整数
-    int head_i = randomValue % heads.size();
-
     auto *userWidget = new ContactUserItem();
-    userWidget->SetInfo(info->name_, heads[head_i]);
+    userWidget->SetInfo(info->name_, Utils::ResolveIcon(info->icon_));
     QListWidgetItem *item = new QListWidgetItem;
     item->setSizeHint(userWidget->sizeHint());
     // 身份由 item role 表达：联系人条目 + uid

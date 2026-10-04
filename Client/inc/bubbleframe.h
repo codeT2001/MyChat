@@ -16,10 +16,11 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *e);
+    // 子类（TextBubble 等）按气泡配色切换文字颜色需要读取
+    bool self_;
 
 private:
     QHBoxLayout *layout_;
-    bool self_;
     int margin_;
 };
 

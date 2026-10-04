@@ -26,15 +26,12 @@ QSize ContactUserItem::sizeHint() const
 
 void ContactUserItem::SetInfo(const QString &name, const QString &icon)
 {
-    // 名称与头像解耦：头像失败不影响名称显示
-    QPixmap pixmap(icon);
+    // 名称与头像解耦：头像失败不影响名称显示；ResolveIcon 统一解析协议 icon 字段
+    QPixmap pixmap = Utils::RoundedAvatar(icon, ui->iconLb->size());
     if (pixmap.isNull()) {
         LOG_WARN() << "ContactUserItem: failed to load icon" << icon;
     } else {
-        // 与 UserWidget 保持一致：先等比缩放，再由 setScaledContents 拉伸填满 label
-        ui->iconLb->setPixmap(
-            pixmap.scaled(ui->iconLb->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        ui->iconLb->setScaledContents(true);
+        ui->iconLb->setPixmap(pixmap);
     }
 
     ui->nameLb->setText(name);

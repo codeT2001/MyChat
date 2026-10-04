@@ -4,6 +4,8 @@
 #include <QWidget>
 #include <QLabel>
 #include <QObject>
+#include <QPixmap>
+#include <QSize>
 
 enum class TipType {
     SUCCESS = 0,
@@ -48,6 +50,15 @@ public:
     static bool CheckVerifyCodeValid(const QString &str, QLabel *label = nullptr, int32_t length = VERIFY_CODE_LENGTH);
     static QString GetServerUrl(const QString &path);
     static void ClearTips();
+
+    // 服务端 icon 字段 -> 本地头像资源路径（唯一入口）。
+    // 约定："head_N" -> ":/images/head_N.jpg"（N=1..kAvatarCount）；
+    // 空串/历史占位("icon")/非法值 -> 默认头像；已是 qrc 路径(":/...")原样透传
+    static QString ResolveIcon(const QString &icon);
+
+    // 头像圆形化：按短边裁成正方形后切圆，输出带透明通道。
+    // QSS 的 border-radius 无法裁剪 QLabel 上的 pixmap，圆形头像需在此处理
+    static QPixmap RoundedAvatar(const QString &icon, const QSize &size);
 
 private:
     Utils() = default;

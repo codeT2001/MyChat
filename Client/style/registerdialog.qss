@@ -1,36 +1,130 @@
 /* ========== RegisterDialog 注册对话框 ========== */
+/* 设计规范见 style/_design_tokens.qss */
+
 QDialog#RegisterDialog {
-   background-color:rgb(255,255,255)
+    background-color: #f8fafc;
 }
 
+/* ---------- 错误提示区 ---------- */
 QLabel#regErrTip {
-   background-color:rgb(255,255,255)
+    background-color: transparent;
+    color: #dc2626;
+    font-size: 12px;
 }
 
-#passLabel[state='unvisible']{
-   border-image: url(:/images/unvisible.png);
+/* ---------- 输入框 ---------- */
+QDialog#RegisterDialog QLineEdit {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: #1e293b;
+    font-size: 13px;
+    selection-background-color: #3b82f6;
 }
 
-#passLabel[state='unvisible_hover']{
-   border-image: url(:/images/unvisible_hover.png);
+QDialog#RegisterDialog QLineEdit:hover {
+    border-color: #cbd5e1;
 }
 
-#passLabel[state='visible']{
-   border-image: url(:/images/visible.png);
+QDialog#RegisterDialog QLineEdit:focus {
+    border: 2px solid #3b82f6;
+    padding: 4px 9px; /* 补偿 focus 边框加宽，避免内容抖动 */
 }
 
-#passLabel[state='visible_hover']{
-   border-image: url(:/images/visible_hover.png);
+/* ---------- 主按钮：确定 ---------- */
+QPushButton#sure {
+    background-color: #3b82f6;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    font-weight: bold;
 }
 
-#confirmLabel[state='unvisible']{
-   border-image: url(:/images/unvisible.png);
+QPushButton#sure:hover {
+    background-color: #2563eb;
 }
 
-#confirmLabel[state='unvisible_hover']{
-   border-image: url(:/images/unvisible_hover.png);
+QPushButton#sure:pressed {
+    background-color: #1d4ed8;
 }
 
-#confirmLabel[state='visible']{
-   border-image: url(:/images/visible.png);
+QPushButton#sure:disabled {
+    background-color: #d1d5db;
+}
+
+/* ---------- 次级按钮：获取验证码 / 取消 ---------- */
+TimerButton#getCode,
+QPushButton#cancle {
+    background-color: #ffffff;
+    color: #3b82f6;
+    border: 1px solid #3b82f6;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 13px;
+}
+
+TimerButton#getCode:hover,
+QPushButton#cancle:hover {
+    background-color: #eff6ff;
+}
+
+TimerButton#getCode:pressed,
+QPushButton#cancle:pressed {
+    background-color: #dbeafe;
+}
+
+TimerButton#getCode:disabled {
+    color: #94a3b8;
+    border-color: #e2e8f0;
+    background-color: #f1f5f9;
+}
+
+/* ---------- 文字链接：返回登录 ---------- */
+QPushButton#backLoginBtn {
+    background-color: transparent;
+    color: #3b82f6;
+    border: none;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+QPushButton#backLoginBtn:hover {
+    color: #2563eb;
+    text-decoration: underline;
+}
+
+/* ---------- 密码可见性切换图标 ---------- */
+#passLabel[state='unvisible'] {
+    border-image: url(:/images/unvisible.png);
+}
+
+#passLabel[state='unvisible_hover'] {
+    border-image: url(:/images/unvisible_hover.png);
+}
+
+#passLabel[state='visible'] {
+    border-image: url(:/images/visible.png);
+}
+
+#passLabel[state='visible_hover'] {
+    border-image: url(:/images/visible_hover.png);
+}
+
+#confirmLabel[state='unvisible'] {
+    border-image: url(:/images/unvisible.png);
+}
+
+#confirmLabel[state='unvisible_hover'] {
+    border-image: url(:/images/unvisible_hover.png);
+}
+
+#confirmLabel[state='visible'] {
+    border-image: url(:/images/visible.png);
+}
+
+#confirmLabel[state='visible_hover'] {
+    border-image: url(:/images/visible_hover.png);
 }

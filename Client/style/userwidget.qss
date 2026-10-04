@@ -8,12 +8,22 @@ UserWidget {
 }
 
 UserWidget:hover {
-    background-color: #f8fafc;
+    background-color: #f1f5f9;
     border-color: #e2e8f0;
 }
 
+/* 选中态：由 ChatUserList 设置 selected 动态属性驱动（::item 背景会被不透明 widget 盖住） */
+UserWidget[selected="true"] {
+    background-color: #eff6ff;
+    border: 1px solid #bfdbfe;
+}
+
+UserWidget[selected="true"]:hover {
+    background-color: #dbeafe;
+}
+
 #UserWidget #iconLb {
-    border-radius: 8px;
+    border-radius: 18px;
     background-color: #f1f5f9;
     border: 2px solid #e2e8f0;
 }

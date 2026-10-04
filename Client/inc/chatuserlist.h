@@ -6,6 +6,7 @@
 
 struct FriendInfo;
 class QListWidgetItem;
+class UserWidget;
 class ChatUserList : public QListWidget {
     Q_OBJECT
 public:
@@ -32,6 +33,8 @@ private slots:
 private:
     void LoadMoreUsers(); // 触底加载下一页（含 loading 动画）
     void AddUserList();   // 从 UserManager 拉取一页并渲染
+    void UpdateSelection(QListWidgetItem *clicked); // 切换条目选中态（配合 QSS selected 属性）
+    UserWidget *FindItemWidget(QListWidgetItem *item) const; // 取条目内 UserWidget（兼容包裹容器）
     bool m_loadingPending = false;
     QMap<int, QListWidgetItem *> chatItemsAdded_; // uid → item，仅用于加载去重
 };

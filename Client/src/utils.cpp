@@ -5,6 +5,9 @@
 #include <QRegularExpression>
 #include <QFile>
 #include <QTextStream>
+#include <QPainter>
+#include <QPainterPath>
+#include <cstring>
 
 namespace {
 // Server URLs
@@ -166,4 +169,52 @@ QString Utils::GetServerUrl(const QString &path)
 void Utils::ClearTips()
 {
     tips_.clear();
+}
+
+namespace {
+// 内置头像数量（images/head_1.jpg ~ head_N.jpg），与服务端注册分配范围保持一致
+constexpr int kAvatarCount = 5;
+constexpr char kDefaultIcon[] = ":/images/head_1.jpg";
+} // namespace
+
+QString Utils::ResolveIcon(const QString &icon)
+{
+    // 已是本地 qrc 路径，直接透传（如 "新的朋友" 用 add_friend.png）
+    if (icon.startsWith(QLatin1String(":/"))) {
+        return icon;
+    }
+    // 协议约定：head_N
+    if (icon.startsWith(QLatin1String("head_"))) {
+        bool ok = false;
+        const int idx = icon.mid(strlen("head_")).toInt(&ok);
+        if (ok && idx >= 1 && idx <= kAvatarCount) {
+            return QStringLiteral(":/images/head_%1.jpg").arg(idx);
+        }
+    }
+    // 空串、历史占位 "icon" 或非法值统一回退默认头像
+    return QString::fromLatin1(kDefaultIcon);
+}
+
+QPixmap Utils::RoundedAvatar(const QString &icon, const QSize &size)
+{
+    QPixmap src(ResolveIcon(icon));
+    if (src.isNull() || !size.isValid() || size.width() <= 0 || size.height() <= 0) {
+        return src;
+    }
+    // 先等比缩放并居中裁成目标比例的正方形，再切圆
+    QPixmap square = src.scaled(size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    const int side = qMin(square.width(), square.height());
+    square = square.copy((square.width() - side) / 2, (square.height() - side) / 2, side, side)
+                 .scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+    QPixmap out(size);
+    out.fill(Qt::transparent);
+    QPainter painter(&out);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QPainterPath path;
+    path.addEllipse(0, 0, size.width(), size.height());
+    painter.setClipPath(path);
+    painter.drawPixmap(0, 0, square);
+    return out;
 }

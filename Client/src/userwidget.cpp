@@ -18,11 +18,8 @@ UserWidget::~UserWidget()
 
 void UserWidget::SetInfo(const QString &name, const QString &icon, const QString &msg)
 {
-    // 加载头像并自动缩放
-    QPixmap pixmap(icon);
-    ui->iconLb->setPixmap(
-        pixmap.scaled(ui->iconLb->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    ui->iconLb->setScaledContents(true);
+    // 加载头像：ResolveIcon 统一解析协议 icon 字段，圆形化展示
+    ui->iconLb->setPixmap(Utils::RoundedAvatar(icon, ui->iconLb->size()));
     ui->nameLb->setText(name);
     ui->msgLb->setText(msg);
 }

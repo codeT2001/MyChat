@@ -1,20 +1,24 @@
+/* ========== InfoPage 个人资料页 ========== */
 #InfoPage {
     background: #ffffff;
 }
 
 #nameLb {
-    color: #1a1a1a;
+    color: #1e293b;
+    font: bold 18px "Microsoft YaHei";
 }
 
 #sectionTitleLb {
-    color: #b2b2b2;
+    color: #94a3b8;
+    font: 12px "Microsoft YaHei";
     margin-left: 30px;
     margin-right: 30px;
 }
 
 #remarkTitleLb,
 #labelTitleLb {
-    color: #8a8a8a;
+    color: #64748b;
+    font: 13px "Microsoft YaHei";
 }
 
 /* 只读态：无边框透明底，看起来与纯文本一致 */
@@ -23,7 +27,8 @@
     background: transparent;
     border: none;
     border-radius: 4px;
-    color: #1a1a1a;
+    color: #1e293b;
+    font: 14px "Microsoft YaHei";
     padding: 2px 4px;
 }
 
@@ -31,20 +36,39 @@
 #remarkEdit:focus,
 #labelEdit:focus {
     background: #ffffff;
-    border: 1px solid #d9d9d9;
+    border: 1px solid #3b82f6;
     padding: 1px 3px;
 }
 
 #line1,
 #line2 {
-    background: #ededed;
+    background: #e2e8f0;
     margin-left: 30px;
     margin-right: 30px;
     max-height: 1px;
 }
 
+/* ========== 操作按钮：图标按钮带 hover 反馈 ========== */
 #msgBtn,
 #voiceBtn,
 #videoBtn {
-    color: #595959;
+    color: #475569;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    padding: 4px 8px;
+}
+
+#msgBtn:hover,
+#voiceBtn:hover,
+#videoBtn:hover {
+    color: #3b82f6;
+    background-color: #f1f5f9;
+}
+
+#msgBtn:pressed,
+#voiceBtn:pressed,
+#videoBtn:pressed {
+    color: #1d4ed8;
+    background-color: #e2e8f0;
 }

@@ -67,11 +67,14 @@ void TextBubble::SetPlainText(const QString &text)
 
 void TextBubble::InitStyleSheet()
 {
-    textEdit_->setStyleSheet(R"(
+    // 蓝底白字 / 白底深字，与 BubbleFrame 的气泡配色配套
+    const char *color = self_ ? "#ffffff" : "#1e293b";
+    textEdit_->setStyleSheet(QString(R"(
         QTextEdit {
             background: transparent;
             border: none;
             padding: 0px;
+            color: %1;
         }
-    )");
+    )").arg(color));
 }
