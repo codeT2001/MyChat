@@ -166,6 +166,13 @@ void AuthService::SlotTcpConnectFinish(bool success)
 
 void AuthService::OnTcpMessageReceived(RequestId id, const QByteArray &data)
 {
+    if (id == RequestId::NOTIFY_KICK) {
+        LOG_WARN() << "kicked by server: account logged in elsewhere";
+        // 立即断开并禁止自动重连——重连也无法恢复登录态（会话已被新登录顶掉）
+        TcpManager::GetInstance().Disconnect();
+        emit sigKicked(tr("您的账号在其他设备登录，您已被迫下线"));
+        return;
+    }
     if (id != RequestId::CHAT_LOGIN_RSP) {
         return;
     }

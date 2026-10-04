@@ -26,6 +26,7 @@ public Q_SLOTS:
     void SwitchLoginDialog();
     void SwitchResetDialog();
     void SlotLoginSuccess();
+    void SlotKicked(const QString &msg);
 
 private:
     Ui::MainWindow *ui;

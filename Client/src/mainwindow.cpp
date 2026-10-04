@@ -2,6 +2,7 @@
 #include "logindialog.h"
 #include "authservice.h"
 #include "./ui_mainwindow.h"
+#include <QMessageBox>
 #include <qdebug.h>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow)
@@ -14,6 +15,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // MainWindow 通过 AuthService 监听登录成功（不再直接依赖 HttpManager/TcpManager）
     connect(&AuthService::GetInstance(), &AuthService::sigLoginSuccess, this, &MainWindow::SlotLoginSuccess);
+    // 被顶号踢下线：弹窗提示并退回登录页
+    connect(&AuthService::GetInstance(), &AuthService::sigKicked, this, &MainWindow::SlotKicked);
 
     setCentralWidget(loginDialog_);
 }
@@ -83,4 +86,23 @@ void MainWindow::SlotLoginSuccess()
     this->setMinimumSize(QSize(1050, 900));
     this->setMaximumSize(QSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX));
     setCentralWidget(chatWindow_);
+}
+
+void MainWindow::SlotKicked(const QString &msg)
+{
+    // 被顶号踢下线：销毁聊天窗口，退回登录页
+    if (chatWindow_) {
+        chatWindow_->deleteLater();
+        chatWindow_ = nullptr;
+    }
+    if (!loginDialog_) {
+        loginDialog_ = new LoginDialog(this);
+        connect(loginDialog_, &LoginDialog::SwitchRegister, this, &MainWindow::SwitchRegisterDialog);
+        connect(loginDialog_, &LoginDialog::SwitchReset, this, &MainWindow::SwitchResetDialog);
+    }
+    // 恢复登录页固定尺寸（与 mainwindow.ui 一致：300x500）
+    this->setMinimumSize(QSize(300, 500));
+    this->setMaximumSize(QSize(300, 500));
+    setCentralWidget(loginDialog_);
+    QMessageBox::warning(this, tr("被迫下线"), msg);
 }

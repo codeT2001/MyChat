@@ -37,6 +37,8 @@ signals:
     void sigLoginSuccess();
     void sigLoginFailed();
     void sigLoginError(const QString &msg);
+    // 被顶号踢下线（账号在其他设备登录），msg 为可直接展示的提示文案
+    void sigKicked(const QString &msg);
 
     // 以下结果信号：ok 为 true 时 msg 为空；失败时 msg 为可直接展示的错误文案
     void sigRegisterVerifyCodeResult(bool ok, const QString &msg);

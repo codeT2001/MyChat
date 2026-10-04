@@ -38,6 +38,7 @@ enum class RequestId {
     TEXT_CHAT_MSG_RSP = 10014,      // 文本聊天消息响应
     NOTIFY_TEXT_CHAT_MSG_REQ = 10015, // 通知文本聊天消息请求
     NOTIFY_TEXT_CHAT_MSG_RSP = 10016, // 通知文本聊天消息响应
+    NOTIFY_KICK = 10017,              // 被顶号踢下线通知（服务端推送）
     CHAT_HEARTBEAT = 99999, // 心跳包
 };
 
