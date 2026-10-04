@@ -10,6 +10,7 @@
 #include "chat/redis_manager.h"
 #include "chat/status_grpc_client.h"
 #include "chat/verify_grpc_client.h"
+#include <random>
 namespace P1 {
 namespace {
 const std::string CODE_PREFIX = "code_";
@@ -143,7 +144,9 @@ void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
     // 检查用户是否已存在（数据库查询）
     std::string name = src["name"].asString();
     std::string pwd = src["passwd"].asString();
-    std::string icon = "icon";
+    // 注册时随机分配头像：icon 存 "head_N"，客户端解析到本地资源 :/images/head_N.jpg
+    static std::mt19937 rng(std::random_device{}());
+    std::string icon = "head_" + std::to_string(std::uniform_int_distribution<int>(1, 5)(rng));
     int uid = MysqlMganager::GetInstance().RegisterUser(name, email, pwd, icon);
     if (uid == 0 || uid == -1) {
         LOG_WARN("[GateServer] RegisterUser failed, user or email already exist, name:%s", name.c_str());
@@ -156,6 +159,7 @@ void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
     root["uid"] = uid;
     root["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
     root["email"] = email;
+    root["icon"] = icon;
 }
 
 void LogicSystem::HandleResetPassword(HttpConnPtr conn)
@@ -187,7 +191,6 @@ void LogicSystem::HandleResetPassword(HttpConnPtr conn)
 
     std::string name = src["name"].asString();
     std::string pwd = src["passwd"].asString();
-    std::string icon = "icon";
     if (!MysqlMganager::GetInstance().CheckEmail(name, email)) {
         LOG_WARN("[GateServer] ResetPassword failed, email not match, name:%s", name.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::EMAIL_NOT_MATCH);

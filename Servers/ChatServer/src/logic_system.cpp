@@ -170,7 +170,6 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     retValue["sex"] = userInfo->sex;
     retValue["name"] = userInfo->name;
     retValue["email"] = userInfo->email;
-    retValue["pwd"] = userInfo->pwd;
     retValue["nick"] = userInfo->nick;
     retValue["desc"] = userInfo->desc;
     retValue["icon"] = userInfo->icon;
@@ -263,7 +262,6 @@ bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::s
         userInfo->uid = root["uid"].asInt();
         userInfo->sex = root["sex"].asInt();
         userInfo->name = root["name"].asString();
-        userInfo->pwd = root["pwd"].asString();
         userInfo->email = root["email"].asString();
         userInfo->nick = root["nick"].asString();
         userInfo->desc = root["desc"].asString();
@@ -280,7 +278,6 @@ bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::s
     root["uid"] = uid;
     root["sex"] = info->sex;
     root["name"] = info->name;
-    root["pwd"] = info->pwd;
     root["email"] = info->email;
     root["nick"] = info->nick;
     root["desc"] = info->desc;
@@ -330,7 +327,6 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
     rtValue["uid"] = uid;
     rtValue["sex"] = info->sex;
     rtValue["name"] = info->name;
-    rtValue["pwd"] = info->pwd;
     rtValue["email"] = info->email;
     rtValue["nick"] = info->nick;
     rtValue["desc"] = info->desc;

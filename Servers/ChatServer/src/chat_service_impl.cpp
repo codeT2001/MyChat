@@ -160,7 +160,6 @@ bool ChatServiceImpl::GetBaseInfo(const std::string& baseKey, int32_t uid, std::
 		reader.parse(info.value(), root);
 		userInfo->uid = root["uid"].asInt();
 		userInfo->name = root["name"].asString();
-		userInfo->pwd = root["pwd"].asString();
 		userInfo->email = root["email"].asString();
 		userInfo->nick = root["nick"].asString();
 		userInfo->desc = root["desc"].asString();
@@ -176,7 +175,6 @@ bool ChatServiceImpl::GetBaseInfo(const std::string& baseKey, int32_t uid, std::
 	}
 	Json::Value val;
 	val["uid"] = uid;
-	val["pwd"] = userInfo->pwd;
 	val["name"] = userInfo->name;
 	val["email"] = userInfo->email;
 	val["nick"] = userInfo->nick;
