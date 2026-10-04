@@ -26,16 +26,16 @@ public:
     // 发起加好友请求
     void AddFriend(int fromUid, int toUid, const QString &name, const QString &desc, const QString &remarkName);
     // 发起好友认证（同意添加）
-    void AuthFriend(int fromUid, int toUid, const QString &name, const QString &desc, const QString &remarkName);
+    void AcceptFriend(int fromUid, int toUid, const QString &name, const QString &desc, const QString &remarkName);
     // 拒绝好友请求（fromUid=申请人, toUid=当前拒绝者）
     void RejectFriend(int fromUid, int toUid);
 
 signals:
     void SigUserSearch(std::shared_ptr<SearchInfo> info);
     void SigFriendApply(std::shared_ptr<AddFriendApply> info);
-    void SigFriendAuth(std::shared_ptr<FriendInfo> info);
-    // 我方申请被对方拒绝（info->uid_ 为拒绝者）
-    void SigFriendRejected(std::shared_ptr<AddFriendApply> info);
+    void SigFriendAccepted(std::shared_ptr<FriendInfo> info);
+    // 我方申请被对方拒绝
+    void SigFriendRejected();
 
 private slots:
     void OnMessageReceived(RequestId id, const QByteArray &data);

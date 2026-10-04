@@ -12,7 +12,6 @@ enum class TipType {
     EMAIL_ERR = 1,
     PWD_ERR = 2,
     CONFIRM_ERR = 3,
-    PWD_CONFIRM = 4,
     VERIFY_CODE_ERR = 5,
     USER_ERR = 6
 };
@@ -35,8 +34,8 @@ public:
     static bool IsEmailValid(const QString &email);
     static bool IsPasswordValid(const QString &pwd);
     static bool IsUserNameValid(const QString &username);
-    static void AddTip(QLabel *label, TipType type, const QString &tip);
-    static void DeleteTip(QLabel *label, TipType type);
+    static void PushTip(QLabel *label, TipType type, const QString &tip);
+    static void PopTip(QLabel *label, TipType type);
     static bool CheckUserValid(const QString &str,
                                QLabel *label = nullptr,
                                int32_t minLength = USERNAME_MIN_LENGTH,
@@ -63,7 +62,7 @@ public:
 private:
     Utils() = default;
     ~Utils() = default;
-    static QMap<TipType, QString> tips_;
+    static QMap<TipType, QString> tipStack_;
 };
 
 #endif // UTILS_H

@@ -24,12 +24,6 @@ bool ApplyFriendList::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
-    if (watched == this->viewport()) {
-        if (event->type() == QEvent::MouseButtonPress) {
-            emit SigShowSearch(false);
-        }
-    }
-
     // 检查事件是否是鼠标滚轮事件
     if (watched == this->viewport() && event->type() == QEvent::Wheel) {
         QWheelEvent *wheelEvent = static_cast<QWheelEvent *>(event);

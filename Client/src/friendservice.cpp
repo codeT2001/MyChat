@@ -2,8 +2,8 @@
 #include "tcpmanager.h"
 #include "jsoncodec.h"
 #include "usermanager.h"
-#include "userdata.h"
-#include "log.h"
+#include "domainmodels.h"
+#include "logger.h"
 
 FriendService::FriendService()
 {
@@ -13,7 +13,7 @@ FriendService::FriendService()
 void FriendService::SearchUser(const QString &uid)
 {
     QByteArray data = JsonSerializer::SerializeSearchUserReq(uid);
-    TcpManager::GetInstance().SlotSendData(RequestId::SEARCH_USER_REQ, data);
+    TcpManager::GetInstance().Send(RequestId::SEARCH_USER_REQ, data);
 }
 
 void FriendService::AddFriend(int fromUid,
@@ -23,26 +23,26 @@ void FriendService::AddFriend(int fromUid,
                               const QString &remarkName)
 {
     QByteArray data = JsonSerializer::SerializeAddFriendReq(fromUid, toUid, name, desc, remarkName);
-    TcpManager::GetInstance().SlotSendData(RequestId::ADD_FRIEND_REQ, data);
+    TcpManager::GetInstance().Send(RequestId::ADD_FRIEND_REQ, data);
 }
 
-void FriendService::AuthFriend(int fromUid,
+void FriendService::AcceptFriend(int fromUid,
                                int toUid,
                                const QString &name,
                                const QString &desc,
                                const QString &remarkName)
 {
     QByteArray data =
-        JsonSerializer::SerializeAuthFriendReq(fromUid, toUid, name, desc, remarkName, AuthAction::ACCEPT);
-    TcpManager::GetInstance().SlotSendData(RequestId::AUTH_FRIEND_REQ, data);
+        JsonSerializer::SerializeAuthFriendReq(fromUid, toUid, name, desc, remarkName, AcceptAction::ACCEPT);
+    TcpManager::GetInstance().Send(RequestId::AUTH_FRIEND_REQ, data);
 }
 
 void FriendService::RejectFriend(int fromUid, int toUid)
 {
-    // 复用 AUTH_FRIEND_REQ，action=0 表示拒绝
+    // 复用 AUTH_FRIEND_REQ，action=AcceptAction::REJECT(2) 表示拒绝
     QByteArray data =
-        JsonSerializer::SerializeAuthFriendReq(fromUid, toUid, QString(), QString(), QString(), AuthAction::REJECT);
-    TcpManager::GetInstance().SlotSendData(RequestId::AUTH_FRIEND_REQ, data);
+        JsonSerializer::SerializeAuthFriendReq(fromUid, toUid, QString(), QString(), QString(), AcceptAction::REJECT);
+    TcpManager::GetInstance().Send(RequestId::AUTH_FRIEND_REQ, data);
 }
 
 void FriendService::OnMessageReceived(RequestId id, const QByteArray &data)
@@ -65,14 +65,14 @@ void FriendService::OnMessageReceived(RequestId id, const QByteArray &data)
             if (result.error != ErrorCodes::SUCCESS) {
                 break;
             }
-            if (result.action == AuthAction::ACCEPT && result.info) {
+            if (result.action == AcceptAction::ACCEPT && result.info) {
                 // 对方同意了我方申请
                 auto friendInfo = std::make_shared<FriendInfo>(result.info);
                 UserManager::GetInstance().AddFriend(friendInfo);
-                emit SigFriendAuth(friendInfo);
+                emit SigFriendAccepted(friendInfo);
             } else {
                 // 对方拒绝了我方申请
-                emit SigFriendRejected(nullptr);
+                emit SigFriendRejected();
             }
             break;
         }
@@ -82,11 +82,11 @@ void FriendService::OnMessageReceived(RequestId id, const QByteArray &data)
                 LOG_WARN() << "AuthFriend rsp error:" << static_cast<int>(result.error);
                 break;
             }
-            if (result.action == AuthAction::ACCEPT && result.info) {
+            if (result.action == AcceptAction::ACCEPT && result.info) {
                 // 我方同意，服务端确认成功
                 auto friendInfo = std::make_shared<FriendInfo>(result.info);
                 UserManager::GetInstance().AddFriend(friendInfo);
-                emit SigFriendAuth(friendInfo);
+                emit SigFriendAccepted(friendInfo);
             }
             // action==REJECT 时服务端确认拒绝成功，无需额外处理（本地已乐观更新）
             break;

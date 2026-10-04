@@ -19,33 +19,32 @@ public:
     explicit MessageTextEdit(QWidget *parent = nullptr);
     ~MessageTextEdit();
 
-    QVector<MsgInfo> GetMsgList();
+    // 取出编辑框内按排版顺序排列的全部消息片段（文本/图片/文件），
+    // 取出后清空输入框与附件记录（take 语义）
+    QVector<MsgInfo> TakeMsgList();
 
     void InsertFileFromUrl(const QStringList &urls);
 signals:
-    void Send();
+    void SigSend();
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dropEvent(QDropEvent *event) override;
     void keyPressEvent(QKeyEvent *e) override;
 
-private slots:
-    void TextEditChanged();
-
 private:
-    void InsertImages(const QString &url);
+    void InsertImage(const QString &url);
     void InsertTextFile(const QString &url);
-    bool CanInsertFromMimeData(const QMimeData *source) const;
     void InsertFromMimeData(const QMimeData *source);
-    bool IsImage(QString url); // 判断文件是否为图片
-    void InsertMsgList(QVector<MsgInfo> &list, QString flag, QString text, QPixmap pix);
+    bool IsImageUrl(const QString &url) const; // 按后缀判断文件是否为图片
+    void AppendMsgInfo(QVector<MsgInfo> &list, const QString &flag, const QString &text, const QPixmap &pix);
 
-    QStringList GetUrl(QString text);
-    QPixmap GetFileIconPixmap(const QString &url); // 获取文件图标及大小信息，并转化成图片
-    QString GetFileSize(qint64 size);              // 获取文件大小
-    QVector<MsgInfo> mMsgList;
-    QVector<MsgInfo> mGetMsgList;
+    QStringList ExtractFileUrls(const QString &text);
+    QPixmap GetFileIconPixmap(const QString &url); // 生成文件图标缩略图（图标+文件名+大小）
+    QString FormatFileSize(qint64 size);           // 字节数格式化为可读大小（B/KB/MB/GB）
+
+    // 编辑过程中已插入输入框的图片/文件附件（文本在发送时从文档中提取）
+    QVector<MsgInfo> attachedMsgs_;
 };
 
 #endif // MESSAGETEXTEDIT_H

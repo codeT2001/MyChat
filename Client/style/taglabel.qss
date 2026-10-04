@@ -1,0 +1,35 @@
+/* ========== TagLabel 标签（点击切换选中态） ========== */
+#TagLabel {
+    border-radius: 4px;
+}
+
+#TagLabel[state='normal'] {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+#TagLabel[state='normal']:hover {
+    background-color: #eef2f7;
+    border-color: #cbd5e1;
+}
+
+#TagLabel[state='selected'] {
+    background-color: #eff6ff;
+    border: 1px solid #3b82f6;
+}
+
+#TagLabel[state='selected']:hover {
+    background-color: #dbeafe;
+    border-color: #2563eb;
+}
+
+#TagLabel #tipLb {
+    background: transparent;
+    border: none;
+    color: #475569;
+    font: 12px "Microsoft YaHei";
+}
+
+#TagLabel[state='selected'] #tipLb {
+    color: #1d4ed8;
+}

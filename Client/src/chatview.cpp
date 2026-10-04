@@ -4,7 +4,7 @@
 #include <QStyleOption>
 #include <QPainter>
 #include <QTimer>
-ChatView::ChatView(QWidget *parent) : QWidget{parent}, isAppended_{false}
+ChatView::ChatView(QWidget *parent) : QWidget{parent}, autoScrollToBottom_{false}
 {
     QVBoxLayout *mainLayout = new QVBoxLayout();
     this->setLayout(mainLayout);
@@ -31,21 +31,16 @@ ChatView::ChatView(QWidget *parent) : QWidget{parent}, isAppended_{false}
     mainLayout->addWidget(scrollArea_);
 
     QScrollBar *scrollBar = scrollArea_->verticalScrollBar();
-    connect(scrollBar, &QScrollBar::rangeChanged, this, &ChatView::OnVScrollBarMoved);
+    connect(scrollBar, &QScrollBar::rangeChanged, this, &ChatView::OnScrollRangeChanged);
     scrollArea_->installEventFilter(this);
-    InitStyleSheet();
 }
 
 void ChatView::AppendChatItem(QWidget *item)
 {
     QVBoxLayout *layout = qobject_cast<QVBoxLayout *>(scrollArea_->widget()->layout());
     layout->insertWidget(layout->count() - 1, item);
-    isAppended_ = true;
+    autoScrollToBottom_ = true;
 }
-
-void ChatView::PrependChatItem(QWidget *item) {}
-
-void ChatView::InsertChatItem(QWidget *before, QWidget *item) {}
 
 void ChatView::Clear()
 {
@@ -83,15 +78,15 @@ void ChatView::paintEvent(QPaintEvent *event)
     style()->drawPrimitive(QStyle::PE_Widget, &opt, &p, this);
 }
 
-void ChatView::OnVScrollBarMoved(int min, int max)
+void ChatView::OnScrollRangeChanged(int min, int max)
 {
-    if (isAppended_) // 添加item可能调用多次
+    Q_UNUSED(min)
+    Q_UNUSED(max)
+    if (autoScrollToBottom_) // 添加item可能调用多次
     {
         QScrollBar *pVScrollBar = scrollArea_->verticalScrollBar();
         pVScrollBar->setSliderPosition(pVScrollBar->maximum());
         // 500毫秒内可能调用多次
-        QTimer::singleShot(500, this, [this]() { isAppended_ = false; });
+        QTimer::singleShot(500, this, [this]() { autoScrollToBottom_ = false; });
     }
 }
-
-void ChatView::InitStyleSheet() {}

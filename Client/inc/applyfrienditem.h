@@ -14,7 +14,8 @@ public:
     explicit ApplyFriendItem(QWidget *parent = nullptr);
     ~ApplyFriendItem();
     void SetInfo(std::shared_ptr<ApplyInfo> apply_info);
-    void ShowAddBtn(bool bshow);
+    // 切换待处理 UI：pending=true 显示"添加"按钮；false 显示"已添加"状态
+    void SetPendingUI(bool pending);
     void ShowRejected();
     QSize sizeHint() const override
     {
@@ -25,9 +26,9 @@ public:
 private:
     Ui::ApplyFriendItem *ui;
     std::shared_ptr<ApplyInfo> info_;
-    bool added_ = false;
+    bool handled_ = false; // 该申请是否已处理（同意/拒绝）
 signals:
-    void sigAuthFriend(std::shared_ptr<ApplyInfo> info);
+    void SigAcceptFriend(std::shared_ptr<ApplyInfo> info);
 };
 
 #endif // APPLYFRIENDITEM_H

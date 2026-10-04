@@ -1,0 +1,56 @@
+/* ========== ConversationItemWidget 会话列表条目 ========== */
+ConversationItemWidget {
+    background-color: #ffffff;
+    border: 1px solid #f1f5f9;
+    border-radius: 8px;
+    padding: 0px;
+    margin: 0px;
+}
+
+ConversationItemWidget:hover {
+    background-color: #f1f5f9;
+    border-color: #e2e8f0;
+}
+
+/* 选中态：由 ChatSessionList 设置 selected 动态属性驱动（::item 背景会被不透明 widget 盖住） */
+ConversationItemWidget[selected="true"] {
+    background-color: #eff6ff;
+    border: 1px solid #bfdbfe;
+}
+
+ConversationItemWidget[selected="true"]:hover {
+    background-color: #dbeafe;
+}
+
+#ConversationItemWidget #iconLb {
+    border-radius: 18px;
+    background-color: #f1f5f9;
+    border: 2px solid #e2e8f0;
+}
+
+#ConversationItemWidget #nameLb {
+    color: #1e293b;
+    font: bold 14px "Microsoft YaHei";
+    margin-bottom: 0px;
+}
+
+#ConversationItemWidget #msgLb {
+    color: #64748b;
+    font: 12px "Microsoft YaHei";
+    margin-top: 0px;
+    max-width: 180px;
+    white-space: nowrap;
+}
+
+#ConversationItemWidget #timeLb {
+    color: #94a3b8;
+    font: 11px "Microsoft YaHei";
+    border-left: 1px solid #e2e8f0;
+    padding-left: 0px;
+}
+
+#ConversationItemWidget #redPointLb {
+    background-color: #ef4444;
+    border-radius: 9px;
+    border: 1.5px solid #ffffff;
+}

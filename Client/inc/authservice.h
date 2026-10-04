@@ -34,21 +34,21 @@ public:
     void ResetPassword(const QString &name, const QString &email, const QString &pwd, const QString &verifyCode);
 
 signals:
-    void sigLoginSuccess();
-    void sigLoginFailed();
-    void sigLoginError(const QString &msg);
+    void SigLoginSuccess();
+    void SigLoginFailed();
+    void SigLoginError(const QString &msg);
     // 被顶号踢下线（账号在其他设备登录），msg 为可直接展示的提示文案
-    void sigKicked(const QString &msg);
+    void SigKicked(const QString &msg);
 
     // 以下结果信号：ok 为 true 时 msg 为空；失败时 msg 为可直接展示的错误文案
-    void sigRegisterVerifyCodeResult(bool ok, const QString &msg);
-    void sigRegisterResult(bool ok, const QString &msg);
-    void sigResetVerifyCodeResult(bool ok, const QString &msg);
-    void sigResetResult(bool ok, const QString &msg);
+    void SigRegisterVerifyCodeResult(bool ok, const QString &msg);
+    void SigRegisterResult(bool ok, const QString &msg);
+    void SigResetVerifyCodeResult(bool ok, const QString &msg);
+    void SigResetResult(bool ok, const QString &msg);
 
 private slots:
     void OnHttpFinish(RequestId id, const QString &res, ErrorCodes err);
-    void SlotTcpConnectFinish(bool success);
+    void OnConnected();
     void OnTcpMessageReceived(RequestId id, const QByteArray &data);
 
 private:

@@ -1,9 +1,9 @@
 #include "infopage.h"
 #include "ui_infopage.h"
-#include "userdata.h"
+#include "domainmodels.h"
 #include "usermanager.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 #include <QPaintEvent>
 #include <QPainter>
 #include <QStyle>
@@ -41,8 +41,8 @@ InfoPage::InfoPage(QWidget *parent) : QWidget(parent), ui(new Ui::InfoPage)
     connect(remarkEditAction_, &QAction::triggered, this, [this]() { ui->remarkEdit->setFocus(); });
     connect(labelEditAction_, &QAction::triggered, this, [this]() { ui->labelEdit->setFocus(); });
     // 回车或失焦 → 与基线值比对，有变化才提交
-    connect(ui->remarkEdit, &QLineEdit::editingFinished, this, &InfoPage::CommitRemark);
-    connect(ui->labelEdit, &QLineEdit::editingFinished, this, &InfoPage::CommitLabel);
+    connect(ui->remarkEdit, &QLineEdit::editingFinished, this, &InfoPage::OnCommitRemark);
+    connect(ui->labelEdit, &QLineEdit::editingFinished, this, &InfoPage::OnCommitLabel);
 
     connect(ui->msgBtn, &QToolButton::clicked, this, [this]() { emit SigSendMessage(uid_); });
     connect(ui->voiceBtn, &QToolButton::clicked, this, [this]() { emit SigVoiceCall(uid_); });
@@ -54,10 +54,10 @@ InfoPage::~InfoPage()
     delete ui;
 }
 
-void InfoPage::SetInfo(std::shared_ptr<FriendInfo> info)
+void InfoPage::SetFriendInfo(std::shared_ptr<FriendInfo> info)
 {
     if (!info) {
-        LOG_WARN() << "InfoPage::SetInfo info is nullptr";
+        LOG_WARN() << "InfoPage::SetFriendInfo info is nullptr";
         return;
     }
     FillContent(info->uid_, info->name_, info->nick_, info->icon_, info->label_);
@@ -167,7 +167,7 @@ bool InfoPage::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
-void InfoPage::CommitRemark()
+void InfoPage::OnCommitRemark()
 {
     CommitEdit(ui->remarkEdit, remarkBase_, [this](const QString &text) {
         // 更新本地好友备注（服务端备注同步协议待接入）
@@ -176,7 +176,7 @@ void InfoPage::CommitRemark()
     });
 }
 
-void InfoPage::CommitLabel()
+void InfoPage::OnCommitLabel()
 {
     CommitEdit(ui->labelEdit, labelBase_, [this](const QString &text) {
         // 更新本地好友标签（服务端标签同步协议待接入）

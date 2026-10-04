@@ -37,12 +37,12 @@
 /* #1e293b  主标题、主文字 */
 
 /* ---------- 圆角 ---------- */
-/* 4px   标签、小徽章 (friendlabel, statusLb) */
+/* 4px   标签、小徽章 (taglabel, statusLb) */
 /* 6px   按钮、输入框 (button, input, toolWidget) */
-/* 8px   卡片、图标框 (userwidget, applyfrienditem, iconLb) */
+/* 8px   卡片、图标框 (conversationitemwidget, applyfrienditem, iconLb) */
 /* 12px  对话框、面板 (dialog, searchWidget) */
 /* 18px  搜索框 (searchEdit) */
-/* 50%   圆形头像 (iconLb in findsuccessdialog) */
+/* 50%   圆形头像 (iconLb in searchresultdialog) */
 
 /* ---------- 字体大小 ---------- */
 /* 11px  时间戳、极次要信息 (timeLb) */

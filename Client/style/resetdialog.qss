@@ -56,7 +56,7 @@ QPushButton#sureBtn:disabled {
 }
 
 /* ---------- 次级按钮：获取验证码 ---------- */
-TimerButton#getCode {
+CountdownButton#getCode {
     background-color: #ffffff;
     color: #3b82f6;
     border: 1px solid #3b82f6;
@@ -65,15 +65,15 @@ TimerButton#getCode {
     font-size: 13px;
 }
 
-TimerButton#getCode:hover {
+CountdownButton#getCode:hover {
     background-color: #eff6ff;
 }
 
-TimerButton#getCode:pressed {
+CountdownButton#getCode:pressed {
     background-color: #dbeafe;
 }
 
-TimerButton#getCode:disabled {
+CountdownButton#getCode:disabled {
     color: #94a3b8;
     border-color: #e2e8f0;
     background-color: #f1f5f9;

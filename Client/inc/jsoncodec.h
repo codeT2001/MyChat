@@ -11,7 +11,7 @@
 struct UserInfo;
 struct SearchInfo;
 struct AddFriendApply;
-struct AuthPeerInfo;
+struct AcceptPeerInfo;
 struct ApplyInfo;
 struct FriendInfo;
 struct ServerInfo;
@@ -23,25 +23,18 @@ struct TextChatData;
 // 从 JSON 对象中提取 error 字段；缺失字段时返回 JSON_PARSE_ERROR。
 ErrorCodes ExtractError(const QJsonObject &obj);
 
-// 认证（同意/拒绝）操作的 action 取值
-namespace AuthAction {
-    constexpr static int NONE = 0; // 默认值，不表示任何操作
-    constexpr static int ACCEPT = 1; // 同意
-    constexpr static int REJECT = 2; // 拒绝
-} // namespace AuthAction
-
 // AUTH_FRIEND_RSP 解析结果：action 区分同意/拒绝，info 仅同意时有效
 struct AuthFriendRspResult {
     ErrorCodes error = ErrorCodes::JSON_PARSE_ERROR;
-    int action = AuthAction::NONE;
-    std::shared_ptr<AuthPeerInfo> info;
+    int action = AcceptAction::NONE;
+    std::shared_ptr<AcceptPeerInfo> info;
 };
 
 // NOTIFY_AUTH_FRIEND_REQ 解析结果：action 区分被同意/被拒绝，info 仅同意时有效
 struct NotifyAuthFriendResult {
     ErrorCodes error = ErrorCodes::JSON_PARSE_ERROR;
-    int action = AuthAction::NONE;
-    std::shared_ptr<AuthPeerInfo> info;
+    int action = AcceptAction::NONE;
+    std::shared_ptr<AcceptPeerInfo> info;
 };
 
 // NOTIFY_TEXT_CHAT_MSG_REQ 解析结果：对端发来的文本消息列表
@@ -92,7 +85,7 @@ public:
                                             const QString &name,
                                             const QString &desc,
                                             const QString &remarkName);
-    // 好友认证请求（action: 1=同意, 0=拒绝）
+    // 好友认证请求（action: AcceptAction::ACCEPT=1 同意, REJECT=2 拒绝）
     static QByteArray SerializeAuthFriendReq(int fromUid,
                                              int toUid,
                                              const QString &name,

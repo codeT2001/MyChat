@@ -1,5 +1,5 @@
 #include "jsoncodec.h"
-#include "userdata.h"
+#include "domainmodels.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -51,9 +51,9 @@ NotifyAuthFriendResult JsonParser::ParseNotifyAuthFriendReq(const QByteArray &da
     if (result.error != ErrorCodes::SUCCESS) {
         return result;
     }
-    result.action = obj.value("action").toInt(AuthAction::ACCEPT);
-    if (result.action == AuthAction::ACCEPT) {
-        result.info = std::make_shared<AuthPeerInfo>(obj["from_uid"].toInt(), obj["name"].toString(),
+    result.action = obj.value("action").toInt(AcceptAction::ACCEPT);
+    if (result.action == AcceptAction::ACCEPT) {
+        result.info = std::make_shared<AcceptPeerInfo>(obj["from_uid"].toInt(), obj["name"].toString(),
                                                      obj["nick"].toString(), obj["icon"].toString(),
                                                      obj["sex"].toInt());
     }
@@ -72,9 +72,9 @@ AuthFriendRspResult JsonParser::ParseAuthFriendRsp(const QByteArray &data)
     if (result.error != ErrorCodes::SUCCESS) {
         return result;
     }
-    result.action = obj.value("action").toInt(AuthAction::ACCEPT);
-    if (result.action == AuthAction::ACCEPT) {
-        result.info = std::make_shared<AuthPeerInfo>(obj["uid"].toInt(), obj["name"].toString(),
+    result.action = obj.value("action").toInt(AcceptAction::ACCEPT);
+    if (result.action == AcceptAction::ACCEPT) {
+        result.info = std::make_shared<AcceptPeerInfo>(obj["uid"].toInt(), obj["name"].toString(),
                                                      obj["nick"].toString(), obj["icon"].toString(),
                                                      obj["sex"].toInt());
     }

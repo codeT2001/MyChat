@@ -5,14 +5,14 @@
         <file>style/logindialog.qss</file>
         <file>style/registerdialog.qss</file>
         <file>style/resetdialog.qss</file>
-        <file>style/chatwindow.qss</file>
+        <file>style/mainpanel.qss</file>
         <file>style/chatpage.qss</file>
-        <file>style/userwidget.qss</file>
+        <file>style/conversationitemwidget.qss</file>
         <file>style/contactuseritem.qss</file>
-        <file>style/adduseritem.qss</file>
-        <file>style/findsuccessdialog.qss</file>
-        <file>style/friendlabel.qss</file>
-        <file>style/applyfrienddialog.qss</file>
+        <file>style/searchentryitem.qss</file>
+        <file>style/searchresultdialog.qss</file>
+        <file>style/taglabel.qss</file>
+        <file>style/friendrequestdialog.qss</file>
         <file>style/applyfriendpage.qss</file>
         <file>style/applyfrienditem.qss</file>
         <file>style/infopage.qss</file>

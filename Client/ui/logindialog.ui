@@ -145,7 +145,7 @@
       </widget>
      </item>
      <item>
-      <widget class="QClickLabel" name="loginPassLb">
+      <widget class="StatefulClickLabel" name="loginPassLb">
        <property name="minimumSize">
         <size>
          <width>25</width>
@@ -184,7 +184,7 @@
       </spacer>
      </item>
      <item>
-      <widget class="QClickLabel" name="forgetLabel">
+      <widget class="StatefulClickLabel" name="forgetLabel">
        <property name="minimumSize">
         <size>
          <width>0</width>
@@ -317,9 +317,9 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>QClickLabel</class>
+   <class>StatefulClickLabel</class>
    <extends>QLabel</extends>
-   <header>qclicklabel.h</header>
+   <header>statefulclicklabel.h</header>
   </customwidget>
  </customwidgets>
  <resources>

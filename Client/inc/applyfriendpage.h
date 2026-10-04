@@ -27,11 +27,9 @@ private:
     Ui::ApplyFriendPage *ui;
     std::unordered_map<int, ApplyFriendItem *> unauthItems_;
 public slots:
-    void SlotFriendAuth(std::shared_ptr<FriendInfo> info);
-    void SlotAuthFriend(std::shared_ptr<ApplyInfo> info);
-    void SlotRejectFriend(std::shared_ptr<ApplyInfo> info);
-signals:
-    void SigShowSearch(bool);
+    void OnFriendAccepted(std::shared_ptr<FriendInfo> info);
+    void OnAcceptFriend(std::shared_ptr<ApplyInfo> info);
+    void OnFriendRejected(std::shared_ptr<ApplyInfo> info);
 };
 
 #endif // APPLYFRIENDPAGE_H

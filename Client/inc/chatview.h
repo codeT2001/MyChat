@@ -11,25 +11,22 @@ class ChatView : public QWidget {
 public:
     explicit ChatView(QWidget *parent = nullptr);
     void AppendChatItem(QWidget *item);
-    void PrependChatItem(QWidget *item);
-    void InsertChatItem(QWidget *before, QWidget *item);
     // 清空所有消息条目（保留底部 stretch）
     void Clear();
 
 protected:
     bool eventFilter(QObject *o, QEvent *e) override;
     void paintEvent(QPaintEvent *event) override;
-signals:
 
 private slots:
-    void OnVScrollBarMoved(int min, int max);
+    // 消息范围变化（新消息追加）时自动滚动到底部
+    void OnScrollRangeChanged(int min, int max);
 
 private:
-    void InitStyleSheet();
     QVBoxLayout *contentLayout_;
     QWidget *contentWidget_;
     QScrollArea *scrollArea_;
-    bool isAppended_;
+    bool autoScrollToBottom_;
 };
 
 #endif // CHATVIEW_H

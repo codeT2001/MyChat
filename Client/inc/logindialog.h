@@ -20,8 +20,8 @@ public slots:
     void OnLoginError(const QString &msg);
 
 signals:
-    void SwitchRegister();
-    void SwitchReset();
+    void SigSwitchRegister();
+    void SigSwitchReset();
 
 private:
     void SetupWindow();

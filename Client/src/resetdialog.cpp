@@ -2,7 +2,7 @@
 #include "ui_resetdialog.h"
 #include "authservice.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 
 ResetDialog::ResetDialog(QWidget *parent) : QDialog(parent), ui(new Ui::ResetDialog)
 {
@@ -90,11 +90,11 @@ void ResetDialog::SetupWindow()
 void ResetDialog::SetupConnections()
 {
     connect(ui->sureBtn, &QPushButton::clicked, this, &ResetDialog::OnSureBtnClicked);
-    connect(ui->backBtn, &QPushButton::clicked, this, &ResetDialog::SwitchLogin);
+    connect(ui->backBtn, &QPushButton::clicked, this, &ResetDialog::SigSwitchLogin);
     connect(ui->getCode, &QPushButton::clicked, this, &ResetDialog::OnGetCodeClicked);
     auto &authService = AuthService::GetInstance();
-    connect(&authService, &AuthService::sigResetVerifyCodeResult, this, &ResetDialog::OnVerifyCodeResult);
-    connect(&authService, &AuthService::sigResetResult, this, &ResetDialog::OnResetResult);
+    connect(&authService, &AuthService::SigResetVerifyCodeResult, this, &ResetDialog::OnVerifyCodeResult);
+    connect(&authService, &AuthService::SigResetResult, this, &ResetDialog::OnResetResult);
 }
 
 void ResetDialog::SetupValidation()

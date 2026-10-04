@@ -14,8 +14,8 @@
 - [三、目录结构](#三目录结构)
 - [四、核心业务时序图](#四核心业务时序图)
 - [五、TCP 通信协议](#五tcp通信协议)
-- [六、聊天主界面（ChatWindow）](#六聊天主界面chatwindow)
-- [七、数据模型（userdata.h）](#七数据模型userdatah)
+- [六、聊天主界面（MainPanel）](#六聊天主界面mainpanel)
+- [七、数据模型（domainmodels.h）](#七数据模型domainmodelsh)
 - [八、模块清单](#八模块清单)
 - [九、构建与运行](#九构建与运行)
 - [十、已知问题与不一致](#十已知问题与不一致)
@@ -43,7 +43,7 @@ graph TB
     Main["main.cpp<br/>加载全局 QSS"] --> MW["MainWindow<br/>窗口调度 setCentralWidget"]
 
     MW -->|"认证界面"| Dialogs["LoginDialog / RegisterDialog / ResetDialog"]
-    MW -->|"登录成功后"| CW["ChatWindow 聊天主界面"]
+    MW -->|"登录成功后"| CW["MainPanel 聊天主界面"]
 
     Dialogs --> Auth["AuthService（单例）<br/>登录/注册/重置认证编排"]
     Auth --> Http["HttpManager（单例）<br/>HTTP 请求/响应分发"]
@@ -68,7 +68,7 @@ graph TB
 
 | 层 | 类 | 职责 |
 |---|---|---|
-| 入口 | `main.cpp` | 创建 `QApplication`、加载全局 QSS、显示主窗口；`#define NO_DEBUG 1` 决定启动 MainWindow（1）还是直接进 ChatWindow（0，调试用） |
+| 入口 | `main.cpp` | 创建 `QApplication`、加载全局 QSS、显示主窗口；`#define USE_FULL_LOGIN_FLOW 1` 决定启动 MainWindow（1）还是直接进 MainPanel（0，调试用） |
 | 窗口调度 | `MainWindow` | 容器，持有各界面指针，用 `setCentralWidget` 做界面切换 |
 | 业务编排 | `AuthService` | 编排"HTTP 登录 → TCP 连接 → TCP 登录"完整链路，并承接注册/验证码/重置密码流程，对外只暴露结果信号（单例） |
 | 业务服务 | `FriendService` | 搜索用户、加好友、同意/拒绝认证；处理对应服务端通知 |
@@ -76,7 +76,7 @@ graph TB
 | 通信层 | `HttpManager` | HTTP 请求与响应分发（单例） |
 | 通信层 | `TcpManager` | TCP 长连接、协议封包/拆包、心跳、断线重连（单例） |
 | 数据层 | `UserManager` | 缓存当前用户资料、token、申请列表、好友列表及各好友消息（单例） |
-| 数据模型 | `userdata.h` | `UserBase` 及各派生数据结构、`TextChatData` |
+| 数据模型 | `domainmodels.h` | `UserBase` 及各派生数据结构、`TextChatData` |
 | 编解码 | `JsonCodec` | `JsonParser` / `JsonSerializer`，只负责 JSON ↔ 数据模型 |
 | 工具 | `Utils` | 表单校验、服务器 URL 拼接、QSS 加载、提示 |
 
@@ -98,7 +98,7 @@ Client/
 └── images/                 # 图标/头像/loading 等图片资源
 ```
 
-> ⚠️ **头文件大小写敏感**：Linux 下 `#include` 必须与文件名大小写完全一致（例如 `ChatUserList.h`），大小写不一致在 Windows 能编过、在 Linux 会直接编译失败。
+> ⚠️ **头文件大小写敏感**：Linux 下 `#include` 必须与文件名大小写完全一致（例如 `ChatSessionList.h`），大小写不一致在 Windows 能编过、在 Linux 会直接编译失败。
 
 ---
 
@@ -130,7 +130,7 @@ sequenceDiagram
     S-->>G: {host, port, token}
     G-->>H: {error:0, uid, host, port, token}
     H-->>A: SigHttpFinish
-    A->>T: SlotTcpConnect(host, port)
+    A->>T: Connect(host, port)
     T-->>A: SigConnectionSuccess
     A->>T: CHAT_LOGIN_REQ {uid, token}
     T->>C: 发送登录帧
@@ -140,14 +140,14 @@ sequenceDiagram
     C-->>T: CHAT_LOGIN_RSP（资料+apply_list+friend_list）
     T-->>A: SigMessageReceived
     A->>U: 写入用户资料/token/申请/好友列表
-    A-->>D: sigLoginSuccess
-    Note over D: MainWindow 切换到 ChatWindow
+    A-->>D: SigLoginSuccess
+    Note over D: MainWindow 切换到 MainPanel
 ```
 
 - **第一段 HTTP**：GateServer 校验账号密码 → 查 `userver_{uid}` 防重复 → StatusServer 分配节点并由其写 `utoken_{uid}`
 - **第二段 TCP**：ChatServer 通过 gRPC 让 StatusServer 校验 token，通过后回传完整资料
 - token 为**一次性消费**（校验后即删），避免重放
-- `AuthService` 把链路收敛成 `sigLoginSuccess / sigLoginFailed / sigLoginError`，UI 不直接接触任何 Manager
+- `AuthService` 把链路收敛成 `SigLoginSuccess / SigLoginFailed / SigLoginError`，UI 不直接接触任何 Manager
 
 ### 4.2 获取验证码 + 注册
 
@@ -169,7 +169,7 @@ sequenceDiagram
     V-->>G: 结果
     G-->>H: {error, email}
     H-->>A: SigHttpFinish
-    A-->>R: sigRegisterVerifyCodeResult
+    A-->>R: SigRegisterVerifyCodeResult
 
     R->>A: Register(name,email,passwd,verifyCode)
     A->>H: POST /registerUser {name,email,passwd,verifyCode}
@@ -179,10 +179,10 @@ sequenceDiagram
     DB-->>G: 新 uid / 失败
     G-->>H: {error, uid?, email?}
     H-->>A: SigHttpFinish
-    A-->>R: sigRegisterResult
+    A-->>R: SigRegisterResult
 ```
 
-> 验证码倒计时按钮为 `TimerButton`；`/getVerifyCode` 的 `error=3` 表示"用户已存在"、`error=4` 视 VerifyServer 实现而定，以 `Servers/VerifyServer/README.md` 的错误码表为准。
+> 验证码倒计时按钮为 `CountdownButton`；`/getVerifyCode` 的 `error=3` 表示"用户已存在"、`error=4` 视 VerifyServer 实现而定，以 `Servers/VerifyServer/README.md` 的错误码表为准。
 
 ### 4.3 找回密码（重置）
 
@@ -209,7 +209,7 @@ sequenceDiagram
         G-->>H: error=0 或 6
     end
     H-->>A: SigHttpFinish
-    A-->>D: sigResetResult
+    A-->>D: SigResetResult
 ```
 
 ### 4.4 搜索用户
@@ -217,7 +217,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant W as ChatWindow/SearchList
+    participant W as MainPanel/SearchList
     participant F as FriendService
     participant T as TcpManager
     participant C as ChatServer
@@ -237,7 +237,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as UI（FindSuccessDialog/ApplyFriendPage）
+    participant U as UI（SearchResultDialog/ApplyFriendPage）
     participant F as FriendService
     participant T as TcpManager
     participant C as ChatServer
@@ -273,7 +273,7 @@ sequenceDiagram
     participant SA as A 的 ChatServer
     participant A as 申请者 A
 
-    B->>F: AuthFriend / RejectFriend
+    B->>F: AcceptFriend / RejectFriend
     F->>SB: AUTH_FRIEND_REQ {from:A, to:B, action}
     SB->>SB: 更新申请状态（同意 1 / 拒绝 2）
     alt 同意
@@ -369,14 +369,14 @@ sequenceDiagram
 
 ---
 
-## 六、聊天主界面（ChatWindow）
+## 六、聊天主界面（MainPanel）
 
-登录成功后进入无边框的 `ChatWindow`：
+登录成功后进入无边框的 `MainPanel`：
 
 | 区域 | 组件 | 内容 |
 |---|---|---|
 | 左侧边栏 | `BadgeButton` ×2（QButtonGroup 互斥） | 聊天 / 通讯录切换，支持未读红点 |
-| 左中页面栈 | `QStackedWidget` | chatsPage（会话列表 ChatUserList）/ contactsPage（ContactUserList）/ searchPage（SearchList） |
+| 左中页面栈 | `QStackedWidget` | chatsPage（会话列表 ChatSessionList）/ contactsPage（ContactUserList）/ searchPage（SearchList） |
 | 顶部搜索框 | `searchEdit` + SearchList | 有内容时切搜索页；点击搜索列表外部关闭 |
 | 右侧内容栈 | `chatDataStackWidget` | ChatPage（聊天页）/ ApplyFriendPage（新的朋友）/ InfoPage（资料页）/ 空白页 |
 
@@ -384,9 +384,9 @@ sequenceDiagram
 
 ```mermaid
 graph TD
-    CW["ChatWindow"] --> CP["ChatPage"]
+    CW["MainPanel"] --> CP["ChatPage"]
     CP --> View["ChatView（QScrollArea，自动滚底）"]
-    View --> Item["ChatItemBase（一条消息：头像+名字+内容）"]
+    View --> Item["ChatMessageItem（一条消息：头像+名字+内容）"]
     Item --> Bubble["BubbleFrame（自绘三角气泡，按 self 朝向）"]
     Bubble --> TB["TextBubble（文本，最大宽 500）"]
     Bubble --> PB["PictureBubble（图片）"]
@@ -400,8 +400,8 @@ graph TD
 ### 加好友 UI 链路
 
 ```
-搜索框 → SearchList（结果）→ FindSuccessDialog（用户确认）
-        → ApplyFriendDialog/Page（填申请信息）
+搜索框 → SearchList（结果）→ SearchResultDialog（用户确认）
+        → FriendRequestDialog/ApplyFriendPage（填申请信息）
         → FriendService.AddFriend
 ```
 
@@ -409,7 +409,7 @@ graph TD
 
 ---
 
-## 七、数据模型（userdata.h）
+## 七、数据模型（domainmodels.h）
 
 ```mermaid
 graph BT
@@ -445,24 +445,24 @@ graph BT
 | `tcpmanager.*` | TCP 单例，封包/拆包、心跳、重连 |
 | `usermanager.*` | 用户/申请/好友/消息数据单例 |
 | `jsoncodec.*` | JSON 解析与序列化（JsonParser/JsonSerializer） |
-| `userdata.*` | 数据模型实现 |
+| `domainmodels.*` | 数据模型实现 |
 | `utils.*` | 表单校验、URL 拼接、QSS 加载 |
 | `constants.h` | ErrorCodes / RequestId / HttpPaths / ServerInfo / MsgInfo |
 | `noncopyable.h` | DISALLOW_COPY_MOVE 宏 |
-| `log.h` | 客户端日志宏（映射 qDebug 等） |
+| `logger.h` | Logger 落盘日志单例与 LOG_XXX 日志宏 |
 
 ### 聊天与消息 UI
 
 | 文件 | 说明 |
 |---|---|
-| `chatwindow.*` | 主界面，页面切换与全局交互 |
+| `mainpanel.*` | 主界面，页面切换与全局交互 |
 | `chatpage.*` | 聊天页（历史渲染、发送、接收追加） |
 | `chatview.*` | 消息滚动区 |
-| `chatitembase.*` | 单条消息容器 |
+| `chatmessageitem.*` | 单条消息容器 |
 | `bubbleframe.*` | 气泡基类（自绘三角） |
 | `textbubble.*` / `picturebubble.*` | 文本 / 图片气泡 |
 | `messagetextedit.*` | 输入框（拖拽、回车发送） |
-| `chatuserlist.*` | 会话列表（分页加载） |
+| `chatsessionlist.*` | 会话列表（分页加载） |
 
 ### 通讯录 / 搜索 / 加好友 UI
 
@@ -470,11 +470,11 @@ graph BT
 |---|---|
 | `contactuserlist.*` / `contactuseritem.*` | 通讯录列表与条目 |
 | `searchlist.*` | 搜索结果列表 |
-| `findsuccessdialog.*` | 搜索命中确认弹窗 |
+| `searchresultdialog.*` | 搜索命中确认弹窗 |
 | `applyfriendpage.*` / `applyfrienditem.*` / `applyfriendlist.*` | 新的朋友页、条目、列表 |
-| `applyfrienddialog.*` | 好友申请对话框 |
-| `friendlabel.*` | 标签选择控件 |
-| `userwidget.*` / `listitembase.*` / `adduseritem.*` / `grouptipitem.*` | 列表项基础组件 |
+| `friendrequestdialog.*` | 好友申请对话框 |
+| `taglabel.*` | 标签选择控件 |
+| `conversationitemwidget.*` / `listitembase.*` / `searchentryitem.*` / `contactsectionheader.*` | 列表项基础组件 |
 | `infopage.*` | 好友 / 自己资料页 |
 | `loadingdialog.*` | 加载提示 |
 
@@ -483,8 +483,8 @@ graph BT
 | 文件 | 说明 |
 |---|---|
 | `logindialog.*` / `registerdialog.*` / `resetdialog.*` | 登录 / 注册 / 重置对话框 |
-| `timerbutton.*` | 获取验证码倒计时按钮 |
-| `qclicklabel.*` / `clickedoncelabel.*` | 可点击标签（多状态图 / 单次点击） |
+| `countdownbutton.*` | 获取验证码倒计时按钮 |
+| `statefulclicklabel.*` | 可点击标签（正常/悬停/按下/选中 多状态） |
 | `badgebutton.*` | 未读红点按钮 |
 
 ---

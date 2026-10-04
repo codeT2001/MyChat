@@ -1,5 +1,5 @@
 #include "tcpmanager.h"
-#include "log.h"
+#include "logger.h"
 namespace {
 constexpr uint32_t MSG_HEAD_LENGTH = sizeof(uint16_t) * 2; // msgId + msgLength
 constexpr int MAX_RECV_BUFFER_SIZE = 1024 * 1024;          // 接收缓冲区上限 1MB
@@ -8,7 +8,7 @@ constexpr int MAX_MSG_BODY_SIZE = 10 * 1024 * 1024;        // 单条消息体上
 TcpManager::TcpManager()
     : host_(""),
       port_(0),
-      recvPedding_(false),
+      recvPending_(false),
       msgId_(0),
       msgLength_(0),
       heartbeatTimer_(new QTimer(this)),
@@ -16,8 +16,6 @@ TcpManager::TcpManager()
       reconnectCount_(0),
       autoReconnect_(true)
 {
-    InitHandlers();
-
     // 心跳定时器：发 PING 保活
     heartbeatTimer_->setInterval(TcpConfig::HEARTBEAT_INTERVAL_MS);
     connect(heartbeatTimer_, &QTimer::timeout, this, &TcpManager::OnHeartbeat);
@@ -30,7 +28,7 @@ TcpManager::TcpManager()
         LOG_INFO() << "connected to server!";
         ResetReconnectState();
         StartHeartbeat();
-        emit SigConnectionSuccess(true);
+        emit SigConnected();
     });
 
     connect(&socket_, &QTcpSocket::readyRead, this, [this]() {
@@ -47,7 +45,7 @@ TcpManager::TcpManager()
         {
             QDataStream stream(&buffer_, QIODevice::ReadOnly);
             stream.setVersion(QDataStream::Qt_6_0);
-            if (!recvPedding_) {
+            if (!recvPending_) {
                 if (buffer_.size() < static_cast<int>(MSG_HEAD_LENGTH)) {
                     return;
                 }
@@ -67,11 +65,11 @@ TcpManager::TcpManager()
             }
 
             if (buffer_.size() < msgLength_) {
-                recvPedding_ = true;
+                recvPending_ = true;
                 return;
             }
 
-            recvPedding_ = false;
+            recvPending_ = false;
             QByteArray body = buffer_.mid(0, msgLength_);
             LOG_DEBUG() << "recive message body is : " << body;
             HandleMsg(static_cast<RequestId>(msgId_), msgLength_, body);
@@ -88,10 +86,9 @@ TcpManager::TcpManager()
         LOG_INFO() << "socket disconnected from server";
         OnSocketDisconnected();
     });
-    connect(this, &TcpManager::SigSendData, this, &TcpManager::SlotSendData);
 }
 
-void TcpManager::SlotTcpConnect(ServerInfo info)
+void TcpManager::Connect(ServerInfo info)
 {
 
     QAbstractSocket::SocketState state = socket_.state();
@@ -106,7 +103,7 @@ void TcpManager::SlotTcpConnect(ServerInfo info)
     socket_.connectToHost(host_, port_);
 }
 
-void TcpManager::SlotSendData(RequestId id, const QByteArray &data)
+void TcpManager::Send(RequestId id, const QByteArray &data)
 {
     LOG_DEBUG() << "msgId : " << static_cast<uint32_t>(id) << "send data : " << QString(data);
     uint16_t copyId = static_cast<uint16_t>(id);
@@ -125,11 +122,6 @@ void TcpManager::SlotSendData(RequestId id, const QByteArray &data)
         // 写了一部分但没写完（发送窗口满了），Qt 会缓冲剩余数据
         LOG_DEBUG() << "TcpManager: partial write:" << bytesWritten << "/" << block.size();
     }
-}
-
-void TcpManager::InitHandlers()
-{
-    // 纯传输层：不再按 RequestId 分发解析，统一由 HandleMsg 转发原始报文给业务层。
 }
 
 void TcpManager::HandleMsg(RequestId id, int32_t len, const QByteArray &data)
@@ -171,14 +163,14 @@ void TcpManager::OnHeartbeat()
         return;
     }
     LOG_DEBUG() << "TcpManager::OnHeartbeat — sending PING";
-    SlotSendData(RequestId::CHAT_HEARTBEAT, QByteArray());
+    Send(RequestId::CHAT_HEARTBEAT, QByteArray());
 }
 
 void TcpManager::OnSocketDisconnected()
 {
     StopHeartbeat();
     buffer_.clear();
-    recvPedding_ = false;
+    recvPending_ = false;
 
     if (!autoReconnect_) {
         LOG_INFO() << "TcpManager::OnSocketDisconnected — autoReconnect disabled, giving up";

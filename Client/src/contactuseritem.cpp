@@ -1,7 +1,7 @@
 #include "contactuseritem.h"
 #include "ui_contactuseritem.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 #include <QPixmap>
 #include <QDebug>
 

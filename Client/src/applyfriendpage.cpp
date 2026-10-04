@@ -1,12 +1,12 @@
 #include "applyfriendpage.h"
 #include "ui_applyfriendpage.h"
 #include "utils.h"
-#include "userdata.h"
+#include "domainmodels.h"
 #include "friendservice.h"
 #include "applyfrienditem.h"
 #include "usermanager.h"
-#include "applyfrienddialog.h"
-#include "log.h"
+#include "friendrequestdialog.h"
+#include "logger.h"
 #include <QPaintEvent>
 #include <QPainter>
 
@@ -17,10 +17,9 @@ ApplyFriendPage::ApplyFriendPage(QWidget *parent) : QWidget(parent), ui(new Ui::
     // QWidget 子类必须开启此属性，QSS 的 background 才会生效
     setAttribute(Qt::WA_StyledBackground);
 
-    connect(ui->applyFriendList, &ApplyFriendList::SigShowSearch, this, &ApplyFriendPage::SigShowSearch);
     LoadApplyList();
     // 好友认证完成后刷新申请条目的状态
-    connect(&FriendService::GetInstance(), &FriendService::SigFriendAuth, this, &ApplyFriendPage::SlotFriendAuth);
+    connect(&FriendService::GetInstance(), &FriendService::SigFriendAccepted, this, &ApplyFriendPage::OnFriendAccepted);
 }
 
 ApplyFriendPage::~ApplyFriendPage()
@@ -43,9 +42,9 @@ void ApplyFriendPage::AddNewApply(std::shared_ptr<AddFriendApply> apply)
     item->setFlags(item->flags() & ~Qt::ItemIsEnabled & ~Qt::ItemIsSelectable);
     ui->applyFriendList->insertItem(0, item);
     ui->applyFriendList->setItemWidget(item, apply_item);
-    apply_item->ShowAddBtn(true);
+    apply_item->SetPendingUI(true);
     unauthItems_[apply_info->uid_] = apply_item;
-    connect(apply_item, &ApplyFriendItem::sigAuthFriend, this, &ApplyFriendPage::SlotAuthFriend);
+    connect(apply_item, &ApplyFriendItem::SigAcceptFriend, this, &ApplyFriendPage::OnAcceptFriend);
 }
 
 void ApplyFriendPage::paintEvent(QPaintEvent *event)
@@ -69,17 +68,17 @@ void ApplyFriendPage::LoadApplyList()
         ui->applyFriendList->insertItem(0, item);
         ui->applyFriendList->setItemWidget(item, apply_item);
         if (apply->status_) {
-            apply_item->ShowAddBtn(false);
+            apply_item->SetPendingUI(false);
         } else {
-            apply_item->ShowAddBtn(true);
+            apply_item->SetPendingUI(true);
             auto uid = apply_item->GetUid();
             unauthItems_[uid] = apply_item;
         }
-        connect(apply_item, &ApplyFriendItem::sigAuthFriend, this, &ApplyFriendPage::SlotAuthFriend);
+        connect(apply_item, &ApplyFriendItem::SigAcceptFriend, this, &ApplyFriendPage::OnAcceptFriend);
     }
 }
 
-void ApplyFriendPage::SlotFriendAuth(std::shared_ptr<FriendInfo> info)
+void ApplyFriendPage::OnFriendAccepted(std::shared_ptr<FriendInfo> info)
 {
     if (!info) {
         return;
@@ -89,20 +88,20 @@ void ApplyFriendPage::SlotFriendAuth(std::shared_ptr<FriendInfo> info)
         return;
     }
 
-    find_iter->second->ShowAddBtn(false);
+    find_iter->second->SetPendingUI(false);
     unauthItems_.erase(find_iter);
 }
 
-void ApplyFriendPage::SlotAuthFriend(std::shared_ptr<ApplyInfo> info)
+void ApplyFriendPage::OnAcceptFriend(std::shared_ptr<ApplyInfo> info)
 {
-    LOG_DEBUG() << "SlotAuthFriend";
-    auto *authFriend = new ApplyFriendDialog(false, this);
+    LOG_DEBUG() << "OnAcceptFriend";
+    auto *authFriend = new FriendRequestDialog(false, this);
     authFriend->SetApplyInfo(info);
-    connect(authFriend, &ApplyFriendDialog::sigRejectFriend, this, &ApplyFriendPage::SlotRejectFriend);
+    connect(authFriend, &FriendRequestDialog::SigFriendRejected, this, &ApplyFriendPage::OnFriendRejected);
     authFriend->show();
 }
 
-void ApplyFriendPage::SlotRejectFriend(std::shared_ptr<ApplyInfo> info)
+void ApplyFriendPage::OnFriendRejected(std::shared_ptr<ApplyInfo> info)
 {
     if (!info) {
         return;

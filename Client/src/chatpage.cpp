@@ -1,8 +1,8 @@
 #include "chatpage.h"
 #include "ui_chatpage.h"
 #include "utils.h"
-#include "log.h"
-#include "userdata.h"
+#include "logger.h"
+#include "domainmodels.h"
 #include "usermanager.h"
 #include "chatservice.h"
 #include <QPaintEvent>
@@ -12,7 +12,7 @@
 #include <QUuid>
 #include <QJsonObject>
 #include <QJsonArray>
-#include "chatitembase.h"
+#include "chatmessageitem.h"
 #include "textbubble.h"
 #include "picturebubble.h"
 
@@ -20,7 +20,7 @@ namespace {
 constexpr int kMaxTextBatchSize = 1024; // 单批文本消息总长度上限
 constexpr int kMaxSingleMsgLen = 1024;  // 单条消息内容长度上限
 
-// 加载头像：统一经 Utils::ResolveIcon 解析协议 icon 字段，圆形化（ChatItemBase 头像固定 42x42）
+// 加载头像：统一经 Utils::ResolveIcon 解析协议 icon 字段，圆形化（ChatMessageItem 头像固定 42x42）
 QPixmap LoadIconOrDefault(const QString &icon)
 {
     return Utils::RoundedAvatar(icon, QSize(42, 42));
@@ -32,7 +32,7 @@ ChatPage::ChatPage(QWidget *parent) : QWidget(parent), ui(new Ui::ChatPage)
     ui->setupUi(this);
     Utils::LoadQss(this, ":/style/chatpage.qss");
     connect(ui->sendMsgBtn, &QPushButton::clicked, this, &ChatPage::OnSendMsgBtnClicked);
-    connect(ui->chatEdit, &MessageTextEdit::Send, this, &ChatPage::OnSendMsgBtnClicked);
+    connect(ui->chatEdit, &MessageTextEdit::SigSend, this, &ChatPage::OnSendMsgBtnClicked);
 }
 
 ChatPage::~ChatPage()
@@ -88,7 +88,7 @@ void ChatPage::AppendMessage(bool isSelf,
                              const QString &content,
                              const QString &type)
 {
-    ChatItemBase *item = new ChatItemBase(isSelf);
+    ChatMessageItem *item = new ChatMessageItem(isSelf);
     item->SetUserName(name);
     item->SetUserIcon(LoadIconOrDefault(icon));
     QWidget *bubble = nullptr;
@@ -116,7 +116,7 @@ void ChatPage::AppendPeerMessage(const QString &name, const QString &icon, const
 void ChatPage::OnSendMsgBtnClicked()
 {
     auto textEdit = ui->chatEdit;
-    const QVector<MsgInfo> &msgList = textEdit->GetMsgList();
+    const QVector<MsgInfo> msgList = textEdit->TakeMsgList();
     if (msgList.isEmpty()) {
         return;
     }
@@ -154,7 +154,7 @@ void ChatPage::OnSendMsgBtnClicked()
         const QString &type = msgList[i].msgFlag;
         LOG_DEBUG() << "send message type : " << type;
 
-        ChatItemBase *item = new ChatItemBase(true);
+        ChatMessageItem *item = new ChatMessageItem(true);
         item->SetUserName(selfName);
         item->SetUserIcon(LoadIconOrDefault(selfIcon));
         QWidget *bubble = nullptr;

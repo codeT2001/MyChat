@@ -1,5 +1,5 @@
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 #include <QStyle>
 #include <QApplication>
 #include <QRegularExpression>
@@ -14,7 +14,7 @@ namespace {
 constexpr char SERVER_HOST[] = "81.69.247.52";
 constexpr int SERVER_PORT = 9090;
 } // namespace
-QMap<TipType, QString> Utils::tips_;
+QMap<TipType, QString> Utils::tipStack_;
 void Utils::ShowTip(QLabel *tip, const QString &msg, bool isError)
 {
     if (!tip) {
@@ -57,27 +57,27 @@ void Utils::LoadQss(QWidget *w, const QString &qrcPath)
     w->setStyleSheet(ts.readAll());
 }
 
-void Utils::AddTip(QLabel *label, TipType type, const QString &tip)
+void Utils::PushTip(QLabel *label, TipType type, const QString &tip)
 {
     if (!label) {
         return;
     }
-    tips_[type] = tip;
+    tipStack_[type] = tip;
     ShowTip(label, tip, true);
 }
 
-void Utils::DeleteTip(QLabel *label, TipType type)
+void Utils::PopTip(QLabel *label, TipType type)
 {
 
     if (!label) {
         return;
     }
-    tips_.remove(type);
-    if (tips_.empty()) {
+    tipStack_.remove(type);
+    if (tipStack_.empty()) {
         label->clear();
         return;
     }
-    ShowTip(label, tips_.first(), true);
+    ShowTip(label, tipStack_.first(), true);
 }
 
 bool Utils::IsEmailValid(const QString &email)
@@ -101,63 +101,63 @@ bool Utils::IsUserNameValid(const QString &username)
 bool Utils::CheckUserValid(const QString &str, QLabel *label, int32_t minLength, int32_t maxLength)
 {
     if (str.length() < minLength || str.length() > maxLength) {
-        AddTip(label, TipType::USER_ERR, tr("用户名长度应为%1~%2字符").arg(minLength).arg(maxLength));
+        PushTip(label, TipType::USER_ERR, tr("用户名长度应为%1~%2字符").arg(minLength).arg(maxLength));
         return false;
     }
     if (!IsUserNameValid(str)) {
-        AddTip(label, TipType::USER_ERR, tr("用户名只能包含字母、数字和下划线_"));
+        PushTip(label, TipType::USER_ERR, tr("用户名只能包含字母、数字和下划线_"));
         return false;
     }
 
-    DeleteTip(label, TipType::USER_ERR);
+    PopTip(label, TipType::USER_ERR);
     return true;
 }
 
 bool Utils::CheckPasswordValid(const QString &str, QLabel *label, int32_t minLength, int32_t maxLength)
 {
     if (str.length() < minLength || str.length() > maxLength) {
-        AddTip(label, TipType::PWD_ERR, tr("密码长度应为%1~%2字符").arg(minLength).arg(maxLength));
+        PushTip(label, TipType::PWD_ERR, tr("密码长度应为%1~%2字符").arg(minLength).arg(maxLength));
         return false;
     }
 
     if (!IsPasswordValid(str)) {
-        Utils::AddTip(label, TipType::PWD_ERR, tr("密码只能包含字母、数字和特殊字符!@#$%^&*"));
+        Utils::PushTip(label, TipType::PWD_ERR, tr("密码只能包含字母、数字和特殊字符!@#$%^&*"));
         return false;
     }
 
-    DeleteTip(label, TipType::PWD_ERR);
+    PopTip(label, TipType::PWD_ERR);
     return true;
 }
 
 bool Utils::CheckConfirmValid(const QString &pwd, const QString confirm, QLabel *label)
 {
     if (pwd != confirm) {
-        AddTip(label, TipType::CONFIRM_ERR, tr("两次输入的密码不匹配"));
+        PushTip(label, TipType::CONFIRM_ERR, tr("两次输入的密码不匹配"));
         return false;
     }
 
-    DeleteTip(label, TipType::CONFIRM_ERR);
+    PopTip(label, TipType::CONFIRM_ERR);
     return true;
 }
 
 bool Utils::CheckEmailValid(const QString &str, QLabel *label)
 {
     if (!Utils::IsEmailValid(str)) {
-        Utils::AddTip(label, TipType::EMAIL_ERR, tr("邮箱地址格式不正确"));
+        Utils::PushTip(label, TipType::EMAIL_ERR, tr("邮箱地址格式不正确"));
         return false;
     }
 
-    Utils::DeleteTip(label, TipType::EMAIL_ERR);
+    Utils::PopTip(label, TipType::EMAIL_ERR);
     return true;
 }
 
 bool Utils::CheckVerifyCodeValid(const QString &str, QLabel *label, int32_t length)
 {
     if (str.length() != length) {
-        Utils::AddTip(label, TipType::VERIFY_CODE_ERR, tr("验证码长度应为%1").arg(length));
+        Utils::PushTip(label, TipType::VERIFY_CODE_ERR, tr("验证码长度应为%1").arg(length));
         return false;
     }
-    Utils::DeleteTip(label, TipType::VERIFY_CODE_ERR);
+    Utils::PopTip(label, TipType::VERIFY_CODE_ERR);
     return true;
 }
 
@@ -168,7 +168,7 @@ QString Utils::GetServerUrl(const QString &path)
 
 void Utils::ClearTips()
 {
-    tips_.clear();
+    tipStack_.clear();
 }
 
 namespace {

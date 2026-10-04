@@ -2,7 +2,7 @@
 #include "registerdialog.h"
 #include "ui_registerdialog.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 
 namespace {
 // Configuration constants
@@ -30,26 +30,26 @@ void RegisterDialog::SetupWindow()
 void RegisterDialog::SetupConnections()
 {
     auto &authService = AuthService::GetInstance();
-    connect(&authService, &AuthService::sigRegisterVerifyCodeResult, this, &RegisterDialog::OnVerifyCodeResult);
-    connect(&authService, &AuthService::sigRegisterResult, this, &RegisterDialog::OnRegisterResult);
+    connect(&authService, &AuthService::SigRegisterVerifyCodeResult, this, &RegisterDialog::OnVerifyCodeResult);
+    connect(&authService, &AuthService::SigRegisterResult, this, &RegisterDialog::OnRegisterResult);
 
     connect(ui->getCode, &QPushButton::clicked, this, &RegisterDialog::OnGetCodeClicked);
     connect(ui->sure, &QPushButton::clicked, this, &RegisterDialog::OnSureBtnClicked);
-    connect(ui->cancle, &QPushButton::clicked, this, &RegisterDialog::OnCancelClicked);
+    connect(ui->cancelBtn, &QPushButton::clicked, this, &RegisterDialog::OnCancelClicked);
     connect(ui->backLoginBtn, &QPushButton::clicked, this, &RegisterDialog::OnBackToLoginClicked);
 }
 
 void RegisterDialog::SetupPasswordToggle()
 {
-    ui->passLabel->SetState("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
-    ui->confirmLabel->SetState("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
+    ui->passLabel->SetStateStyles("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
+    ui->confirmLabel->SetStateStyles("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
 
-    connect(ui->passLabel, &QClickLabel::clicked, this, [this]() {
+    connect(ui->passLabel, &StatefulClickLabel::clicked, this, [this]() {
         ui->password->setEchoMode(ui->passLabel->GetCurState() == ClickLabelState::NORMAL ? QLineEdit::Password
                                                                                           : QLineEdit::Normal);
     });
 
-    connect(ui->confirmLabel, &QClickLabel::clicked, this, [this]() {
+    connect(ui->confirmLabel, &StatefulClickLabel::clicked, this, [this]() {
         ui->confirm->setEchoMode(ui->confirmLabel->GetCurState() == ClickLabelState::NORMAL ? QLineEdit::Password
                                                                                             : QLineEdit::Normal);
     });
@@ -73,20 +73,20 @@ void RegisterDialog::SetupTimer()
 void RegisterDialog::OnCancelClicked()
 {
     timer_->stop();
-    emit SwitchLogin();
+    emit SigSwitchLogin();
 }
 
 void RegisterDialog::OnBackToLoginClicked()
 {
     timer_->stop();
-    emit SwitchLogin();
+    emit SigSwitchLogin();
 }
 
 void RegisterDialog::OnTimerTimeout()
 {
     if (countDown_ == 0) {
         timer_->stop();
-        emit SwitchLogin();
+        emit SigSwitchLogin();
         return;
     }
 
@@ -142,7 +142,7 @@ void RegisterDialog::OnRegisterResult(bool ok, const QString &msg)
         return;
     }
     Utils::ShowTip(ui->regErrTip, tr("用户注册成功"));
-    ChangeTipPage();
+    ShowRegisterSuccessPage();
 }
 
 bool RegisterDialog::CheckUserValid()
@@ -176,7 +176,7 @@ bool RegisterDialog::CheckVerifyCodeValid()
     return Utils::CheckVerifyCodeValid(code, ui->regErrTip);
 }
 
-void RegisterDialog::ChangeTipPage()
+void RegisterDialog::ShowRegisterSuccessPage()
 {
     timer_->stop();
     ui->stackedWidget->setCurrentWidget(ui->page_2);

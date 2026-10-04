@@ -23,7 +23,7 @@ public:
     ~InfoPage();
 
     // 朋友资料：资料行可直接编辑（hover 行尾显示编辑图标作为提示），底部操作可见
-    void SetInfo(std::shared_ptr<FriendInfo> info);
+    void SetFriendInfo(std::shared_ptr<FriendInfo> info);
     // 自己的资料：隐藏备注/标签编辑行与发消息/语音/视频操作
     void SetSelfInfo(std::shared_ptr<UserInfo> info);
 
@@ -39,8 +39,8 @@ signals:
 
 private slots:
     // 回车/失焦：若文本有变化则提交
-    void CommitRemark();
-    void CommitLabel();
+    void OnCommitRemark();
+    void OnCommitLabel();
 
 private:
     // 公共填充：头像/昵称/备注/标签

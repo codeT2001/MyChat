@@ -2,8 +2,8 @@
 #include "tcpmanager.h"
 #include "jsoncodec.h"
 #include "usermanager.h"
-#include "userdata.h"
-#include "log.h"
+#include "domainmodels.h"
+#include "logger.h"
 
 ChatService::ChatService()
 {
@@ -13,7 +13,7 @@ ChatService::ChatService()
 void ChatService::SendTextChatMsg(int fromUid, int toUid, const QJsonArray &textArray)
 {
     QByteArray data = JsonSerializer::SerializeTextChatMsgReq(fromUid, toUid, textArray);
-    TcpManager::GetInstance().SlotSendData(RequestId::TEXT_CHAT_MSG_REQ, data);
+    TcpManager::GetInstance().Send(RequestId::TEXT_CHAT_MSG_REQ, data);
 }
 
 void ChatService::OnMessageReceived(RequestId id, const QByteArray &data)

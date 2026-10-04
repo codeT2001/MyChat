@@ -1,5 +1,5 @@
 #include "bubbleframe.h"
-#include "log.h"
+#include "logger.h"
 #include <QPainter>
 #include <QColor>
 namespace {

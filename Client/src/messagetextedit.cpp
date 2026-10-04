@@ -1,40 +1,36 @@
 #include "messagetextedit.h"
-#include "log.h"
+#include "logger.h"
 #include <QDebug>
 #include <QMessageBox>
 
 MessageTextEdit::MessageTextEdit(QWidget *parent) : QTextEdit(parent)
 {
-
-    // this->setStyleSheet("border: none;");
     this->setMaximumHeight(60);
-
-    //    connect(this,SIGNAL(textChanged()),this,SLOT(textEditChanged()));
 }
 
 MessageTextEdit::~MessageTextEdit() {}
 
-QVector<MsgInfo> MessageTextEdit::GetMsgList()
+QVector<MsgInfo> MessageTextEdit::TakeMsgList()
 {
-    mGetMsgList.clear();
+    QVector<MsgInfo> result;
 
     QString doc = this->document()->toPlainText();
     QString text = ""; // 存储文本信息
     int indexUrl = 0;
-    int count = mMsgList.size();
+    int count = attachedMsgs_.size();
 
     for (int index = 0; index < doc.size(); index++) {
         if (doc[index] == QChar::ObjectReplacementCharacter) {
             if (!text.isEmpty()) {
                 QPixmap pix;
-                InsertMsgList(mGetMsgList, "text", text, pix);
+                AppendMsgInfo(result, "text", text, pix);
                 text.clear();
             }
             while (indexUrl < count) {
-                MsgInfo msg = mMsgList[indexUrl];
+                MsgInfo msg = attachedMsgs_[indexUrl];
                 if (this->document()->toHtml().contains(msg.content, Qt::CaseSensitive)) {
                     indexUrl++;
-                    mGetMsgList.append(msg);
+                    result.append(msg);
                     break;
                 }
                 indexUrl++;
@@ -45,12 +41,12 @@ QVector<MsgInfo> MessageTextEdit::GetMsgList()
     }
     if (!text.isEmpty()) {
         QPixmap pix;
-        InsertMsgList(mGetMsgList, "text", text, pix);
+        AppendMsgInfo(result, "text", text, pix);
         text.clear();
     }
-    mMsgList.clear();
+    attachedMsgs_.clear();
     this->clear();
-    return mGetMsgList;
+    return result;
 }
 
 void MessageTextEdit::dragEnterEvent(QDragEnterEvent *event)
@@ -70,7 +66,7 @@ void MessageTextEdit::dropEvent(QDropEvent *event)
 void MessageTextEdit::keyPressEvent(QKeyEvent *e)
 {
     if ((e->key() == Qt::Key_Enter || e->key() == Qt::Key_Return) && !(e->modifiers() & Qt::ShiftModifier)) {
-        emit Send();
+        emit SigSend();
         return;
     }
     QTextEdit::keyPressEvent(e);
@@ -82,15 +78,15 @@ void MessageTextEdit::InsertFileFromUrl(const QStringList &urls)
         return;
 
     foreach (QString url, urls) {
-        if (IsImage(url)) {
-            InsertImages(url);
+        if (IsImageUrl(url)) {
+            InsertImage(url);
         } else {
             InsertTextFile(url);
         }
     }
 }
 
-void MessageTextEdit::InsertImages(const QString &url)
+void MessageTextEdit::InsertImage(const QString &url)
 {
     QImage image(url);
     if (image.isNull()) {
@@ -106,11 +102,9 @@ void MessageTextEdit::InsertImages(const QString &url)
         }
     }
     QTextCursor cursor = this->textCursor();
-    // QTextDocument *document = this->document();
-    // document->addResource(QTextDocument::ImageResource, QUrl(url), QVariant(image));
     cursor.insertImage(image, url);
 
-    InsertMsgList(mMsgList, "image", url, QPixmap::fromImage(image));
+    AppendMsgInfo(attachedMsgs_, "image", url, QPixmap::fromImage(image));
 }
 
 void MessageTextEdit::InsertTextFile(const QString &url)
@@ -129,22 +123,17 @@ void MessageTextEdit::InsertTextFile(const QString &url)
     QPixmap pix = GetFileIconPixmap(url);
     QTextCursor cursor = this->textCursor();
     cursor.insertImage(pix.toImage(), url);
-    InsertMsgList(mMsgList, "file", url, pix);
-}
-
-bool MessageTextEdit::CanInsertFromMimeData(const QMimeData *source) const
-{
-    return QTextEdit::canInsertFromMimeData(source);
+    AppendMsgInfo(attachedMsgs_, "file", url, pix);
 }
 
 void MessageTextEdit::InsertFromMimeData(const QMimeData *source)
 {
-    QStringList urls = GetUrl(source->text());
+    QStringList urls = ExtractFileUrls(source->text());
 
     if (!urls.isEmpty()) {
         foreach (const QString &url, urls) {
-            if (IsImage(url)) {
-                InsertImages(url);
+            if (IsImageUrl(url)) {
+                InsertImage(url);
             } else {
                 InsertTextFile(url);
             }
@@ -154,20 +143,19 @@ void MessageTextEdit::InsertFromMimeData(const QMimeData *source)
     }
 }
 
-bool MessageTextEdit::IsImage(QString url)
+bool MessageTextEdit::IsImageUrl(const QString &url) const
 {
-    LOG_DEBUG() << "IsImage INTO";
-    QString imageFormat = "bmp,jpg,png,tif,gif,pcx,tga,exif,fpx,svg,psd,cdr,pcd,dxf,ufo,eps,ai,raw,wmf,webp";
-    QStringList imageFormatList = imageFormat.split(",");
+    static const QStringList imageFormats =
+        {"bmp", "jpg", "png", "tif", "gif", "pcx", "tga", "exif", "fpx", "svg",
+         "psd", "cdr", "pcd", "dxf", "ufo", "eps", "ai", "raw", "wmf", "webp"};
     QFileInfo fileInfo(url);
-    QString suffix = fileInfo.suffix();
-    if (imageFormatList.contains(suffix, Qt::CaseInsensitive)) {
-        return true;
-    }
-    return false;
+    return imageFormats.contains(fileInfo.suffix(), Qt::CaseInsensitive);
 }
 
-void MessageTextEdit::InsertMsgList(QVector<MsgInfo> &list, QString flag, QString text, QPixmap pix)
+void MessageTextEdit::AppendMsgInfo(QVector<MsgInfo> &list,
+                                    const QString &flag,
+                                    const QString &text,
+                                    const QPixmap &pix)
 {
     MsgInfo msg;
     msg.msgFlag = flag;
@@ -176,7 +164,7 @@ void MessageTextEdit::InsertMsgList(QVector<MsgInfo> &list, QString flag, QStrin
     list.append(msg);
 }
 
-QStringList MessageTextEdit::GetUrl(QString text)
+QStringList MessageTextEdit::ExtractFileUrls(const QString &text)
 {
     QStringList urls;
     if (text.isEmpty())
@@ -195,25 +183,22 @@ QStringList MessageTextEdit::GetUrl(QString text)
 
 QPixmap MessageTextEdit::GetFileIconPixmap(const QString &url)
 {
-    QFileIconProvider provder;
+    QFileIconProvider provider;
     QFileInfo fileinfo(url);
-    QIcon icon = provder.icon(fileinfo);
+    QIcon icon = provider.icon(fileinfo);
 
-    QString strFileSize = GetFileSize(fileinfo.size());
-    // qDebug() << "FileSize=" << fileinfo.size();
+    QString strFileSize = FormatFileSize(fileinfo.size());
 
     QFont font(QString("宋体"), 10, QFont::Normal, false);
     QFontMetrics fontMetrics(font);
     QSize textSize = fontMetrics.size(Qt::TextSingleLine, fileinfo.fileName());
 
-    QSize FileSize = fontMetrics.size(Qt::TextSingleLine, strFileSize);
-    int maxWidth = textSize.width() > FileSize.width() ? textSize.width() : FileSize.width();
+    QSize fileSizeText = fontMetrics.size(Qt::TextSingleLine, strFileSize);
+    int maxWidth = textSize.width() > fileSizeText.width() ? textSize.width() : fileSizeText.width();
     QPixmap pix(50 + maxWidth + 10, 50);
     pix.fill();
 
     QPainter painter;
-    // painter.setRenderHint(QPainter::Antialiasing, true);
-    // painter.setFont(font);
     painter.begin(&pix);
     // 文件图标
     QRect rect(0, 0, 50, 50);
@@ -223,33 +208,28 @@ QPixmap MessageTextEdit::GetFileIconPixmap(const QString &url)
     QRect rectText(50 + 10, 3, textSize.width(), textSize.height());
     painter.drawText(rectText, fileinfo.fileName());
     // 文件大小
-    QRect rectFile(50 + 10, textSize.height() + 5, FileSize.width(), FileSize.height());
+    QRect rectFile(50 + 10, textSize.height() + 5, fileSizeText.width(), fileSizeText.height());
     painter.drawText(rectFile, strFileSize);
     painter.end();
     return pix;
 }
 
-QString MessageTextEdit::GetFileSize(qint64 size)
+QString MessageTextEdit::FormatFileSize(qint64 size)
 {
-    QString Unit;
+    QString unit;
     double num;
     if (size < 1024) {
         num = size;
-        Unit = "B";
+        unit = "B";
     } else if (size < 1024 * 1224) {
         num = size / 1024.0;
-        Unit = "KB";
-    } else if (size < 1024 * 1024 * 1024) {
+        unit = "KB";
+    } else if (size < 1024LL * 1024 * 1024) {
         num = size / 1024.0 / 1024.0;
-        Unit = "MB";
+        unit = "MB";
     } else {
         num = size / 1024.0 / 1024.0 / 1024.0;
-        Unit = "GB";
+        unit = "GB";
     }
-    return QString::number(num, 'f', 2) + " " + Unit;
-}
-
-void MessageTextEdit::TextEditChanged()
-{
-    // qDebug() << "text changed!" << endl;
+    return QString::number(num, 'f', 2) + " " + unit;
 }

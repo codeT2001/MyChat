@@ -4,7 +4,7 @@
 #include <QMainWindow>
 #include "registerdialog.h"
 #include "resetdialog.h"
-#include "chatwindow.h"
+#include "mainpanel.h"
 
 class LoginDialog;
 
@@ -22,17 +22,17 @@ public:
     ~MainWindow();
 
 public Q_SLOTS:
-    void SwitchRegisterDialog();
-    void SwitchLoginDialog();
-    void SwitchResetDialog();
-    void SlotLoginSuccess();
-    void SlotKicked(const QString &msg);
+    void OnSwitchRegisterDialog();
+    void OnSwitchLoginDialog();
+    void OnSwitchResetDialog();
+    void OnLoginSuccess();
+    void OnKicked(const QString &msg);
 
 private:
     Ui::MainWindow *ui;
     LoginDialog *loginDialog_ = nullptr;
     RegisterDialog *registerDialog_ = nullptr;
     ResetDialog *resetDialog_ = nullptr;
-    ChatWindow *chatWindow_ = nullptr;
+    MainPanel *mainPanel_ = nullptr;
 };
 #endif // MAINWINDOW_H

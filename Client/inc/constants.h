@@ -50,16 +50,18 @@ inline constexpr char RESET_PASSWORD[] = "/resetPassword";
 inline constexpr char USER_LOGIN[] = "/userLogin";
 } // namespace HttpPaths
 
+// 好友认证（同意/拒绝）操作的 action 取值——线上协议载荷 jsonObj["action"]，数值冻结
+namespace AcceptAction {
+constexpr static int NONE = 0; // 默认值，不表示任何操作
+constexpr static int ACCEPT = 1; // 同意
+constexpr static int REJECT = 2; // 拒绝
+} // namespace AcceptAction
+
 struct ServerInfo {
     uint16_t port;
     int32_t uid;
     QString host;
     QString token;
-};
-
-enum class MSG_IDS {
-    CHAT_LOGIN = 10001,
-    CHAT_LOGIN_RSP,
 };
 
 struct MsgInfo {

@@ -164,7 +164,7 @@
         </widget>
        </item>
        <item>
-        <widget class="QClickLabel" name="passLabel">
+        <widget class="StatefulClickLabel" name="passLabel">
          <property name="minimumSize">
           <size>
            <width>25</width>
@@ -210,7 +210,7 @@
         </widget>
        </item>
        <item>
-        <widget class="QClickLabel" name="confirmLabel">
+        <widget class="StatefulClickLabel" name="confirmLabel">
          <property name="minimumSize">
           <size>
            <width>25</width>
@@ -253,7 +253,7 @@
         </widget>
        </item>
        <item>
-        <widget class="TimerButton" name="getCode">
+        <widget class="CountdownButton" name="getCode">
          <property name="minimumSize">
           <size>
            <width>0</width>
@@ -296,7 +296,7 @@
         </widget>
        </item>
        <item>
-        <widget class="QPushButton" name="cancle">
+        <widget class="QPushButton" name="cancelBtn">
          <property name="minimumSize">
           <size>
            <width>0</width>
@@ -431,14 +431,14 @@
  </widget>
  <customwidgets>
   <customwidget>
-   <class>TimerButton</class>
+   <class>CountdownButton</class>
    <extends>QPushButton</extends>
-   <header>timerbutton.h</header>
+   <header>countdownbutton.h</header>
   </customwidget>
   <customwidget>
-   <class>QClickLabel</class>
+   <class>StatefulClickLabel</class>
    <extends>QLabel</extends>
-   <header>qclicklabel.h</header>
+   <header>statefulclicklabel.h</header>
   </customwidget>
  </customwidgets>
  <resources/>

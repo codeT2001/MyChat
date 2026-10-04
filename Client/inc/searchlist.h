@@ -1,15 +1,15 @@
-﻿#ifndef SEARCHLIST_H
+#ifndef SEARCHLIST_H
 #define SEARCHLIST_H
 
 #include <QListWidget>
 struct SearchInfo;
-class FindSuccessDialog;
+class SearchResultDialog;
 class LoadingDialog;
 class SearchList : public QListWidget {
     Q_OBJECT
 public:
     explicit SearchList(QWidget *parent = nullptr);
-    void CloseFindSuccessDialog();
+    void CloseSearchResultDialog();
     void SetSearchEdit(QWidget *w);
 
 signals:
@@ -20,16 +20,16 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void showEvent(QShowEvent *event) override;
 private slots:
-    void SlotItemClicked(QListWidgetItem *item);
-    void SlotUserSearch(std::shared_ptr<SearchInfo> info);
+    void OnItemClicked(QListWidgetItem *item);
+    void OnUserSearch(std::shared_ptr<SearchInfo> info);
 
 private:
-    void WaitPending(bool pending = true);
-    void AddTipItem();
+    void SetSearchPending(bool pending = true); // 显示/隐藏搜索 loading 并记录进行中状态
+    void AddSearchEntryItem();                 // 添加"查找 uid/name"入口条目
     bool searchPending_;
     QWidget *searchEdit_;
     LoadingDialog *loadingDialog_;
-    FindSuccessDialog *findSuccessDialog_ = nullptr;
+    SearchResultDialog *searchResultDialog_ = nullptr;
 };
 
 #endif // SEARCHLIST_H

@@ -23,7 +23,7 @@ public Q_SLOTS:
     void OnVerifyCodeResult(bool ok, const QString &msg);
     void OnRegisterResult(bool ok, const QString &msg);
 Q_SIGNALS:
-    void SwitchLogin();
+    void SigSwitchLogin();
 
 private:
     // Setup methods
@@ -38,7 +38,7 @@ private:
     bool CheckConfirmValid();
     bool CheckEmailValid();
     bool CheckVerifyCodeValid();
-    void ChangeTipPage();
+    void ShowRegisterSuccessPage();
     Ui::RegisterDialog *ui;
     QTimer *timer_;
     int32_t countDown_;

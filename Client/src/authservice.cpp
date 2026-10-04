@@ -3,9 +3,9 @@
 #include "httpmanager.h"
 #include "usermanager.h"
 #include "jsoncodec.h"
-#include "userdata.h"
+#include "domainmodels.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUrl>
@@ -13,7 +13,7 @@
 AuthService::AuthService()
 {
     connect(&HttpManager::GetInstance(), &HttpManager::SigHttpFinish, this, &AuthService::OnHttpFinish);
-    connect(&TcpManager::GetInstance(), &TcpManager::SigConnectionSuccess, this, &AuthService::SlotTcpConnectFinish);
+    connect(&TcpManager::GetInstance(), &TcpManager::SigConnected, this, &AuthService::OnConnected);
     connect(&TcpManager::GetInstance(), &TcpManager::SigMessageReceived, this, &AuthService::OnTcpMessageReceived);
 }
 
@@ -93,18 +93,18 @@ void AuthService::OnHttpFinish(RequestId id, const QString &res, ErrorCodes err)
     switch (id) {
         case RequestId::GET_VERIFY_CODE: {
             if (verifyFlow_ == VerifyFlow::Register) {
-                emit sigRegisterVerifyCodeResult(ok, msg);
+                emit SigRegisterVerifyCodeResult(ok, msg);
             } else if (verifyFlow_ == VerifyFlow::Reset) {
-                emit sigResetVerifyCodeResult(ok, msg);
+                emit SigResetVerifyCodeResult(ok, msg);
             }
             verifyFlow_ = VerifyFlow::None;
             break;
         }
         case RequestId::REG_USER:
-            emit sigRegisterResult(ok, msg);
+            emit SigRegisterResult(ok, msg);
             break;
         case RequestId::RESET_PASSWORD:
-            emit sigResetResult(ok, msg);
+            emit SigResetResult(ok, msg);
             break;
         default:
             break;
@@ -115,21 +115,21 @@ void AuthService::EmitHttpError(RequestId id, const QString &msg)
 {
     switch (id) {
         case RequestId::USER_LOGIN:
-            emit sigLoginError(msg);
+            emit SigLoginError(msg);
             break;
         case RequestId::GET_VERIFY_CODE:
             if (verifyFlow_ == VerifyFlow::Register) {
-                emit sigRegisterVerifyCodeResult(false, msg);
+                emit SigRegisterVerifyCodeResult(false, msg);
             } else if (verifyFlow_ == VerifyFlow::Reset) {
-                emit sigResetVerifyCodeResult(false, msg);
+                emit SigResetVerifyCodeResult(false, msg);
             }
             verifyFlow_ = VerifyFlow::None;
             break;
         case RequestId::REG_USER:
-            emit sigRegisterResult(false, msg);
+            emit SigRegisterResult(false, msg);
             break;
         case RequestId::RESET_PASSWORD:
-            emit sigResetResult(false, msg);
+            emit SigResetResult(false, msg);
             break;
         default:
             break;
@@ -140,7 +140,7 @@ void AuthService::HandleLoginHttpRsp(const QJsonObject &obj)
 {
     int error = obj["error"].toInt();
     if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-        emit sigLoginError(tr("参数错误"));
+        emit SigLoginError(tr("参数错误"));
         return;
     }
     ServerInfo info = JsonParser::ParseLoginHttpRsp(obj);
@@ -150,18 +150,14 @@ void AuthService::HandleLoginHttpRsp(const QJsonObject &obj)
 
     LOG_INFO() << "AuthService: HTTP login ok, connecting to" << info.host << info.port;
     // 发起 TCP 连接
-    TcpManager::GetInstance().SlotTcpConnect(info);
+    TcpManager::GetInstance().Connect(info);
 }
 
-void AuthService::SlotTcpConnectFinish(bool success)
+void AuthService::OnConnected()
 {
-    if (success) {
-        LOG_INFO() << "AuthService: TCP connected, sending CHAT_LOGIN";
-        QByteArray data = JsonSerializer::SerializeChatLoginReq(static_cast<int>(uid_), token_);
-        TcpManager::GetInstance().SlotSendData(RequestId::CHAT_LOGIN_REQ, data);
-    } else {
-        emit sigLoginError(tr("网络异常"));
-    }
+    LOG_INFO() << "AuthService: TCP connected, sending CHAT_LOGIN";
+    QByteArray data = JsonSerializer::SerializeChatLoginReq(static_cast<int>(uid_), token_);
+    TcpManager::GetInstance().Send(RequestId::CHAT_LOGIN_REQ, data);
 }
 
 void AuthService::OnTcpMessageReceived(RequestId id, const QByteArray &data)
@@ -170,7 +166,7 @@ void AuthService::OnTcpMessageReceived(RequestId id, const QByteArray &data)
         LOG_WARN() << "kicked by server: account logged in elsewhere";
         // 立即断开并禁止自动重连——重连也无法恢复登录态（会话已被新登录顶掉）
         TcpManager::GetInstance().Disconnect();
-        emit sigKicked(tr("您的账号在其他设备登录，您已被迫下线"));
+        emit SigKicked(tr("您的账号在其他设备登录，您已被迫下线"));
         return;
     }
     if (id != RequestId::CHAT_LOGIN_RSP) {
@@ -180,13 +176,13 @@ void AuthService::OnTcpMessageReceived(RequestId id, const QByteArray &data)
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (doc.isNull()) {
         LOG_WARN() << "AuthService: CHAT_LOGIN_RSP parse failed";
-        emit sigLoginFailed();
+        emit SigLoginFailed();
         return;
     }
     QJsonObject obj = doc.object();
     if (ExtractError(obj) != ErrorCodes::SUCCESS) {
         LOG_WARN() << "AuthService: CHAT_LOGIN_RSP error";
-        emit sigLoginFailed();
+        emit SigLoginFailed();
         return;
     }
 
@@ -201,5 +197,5 @@ void AuthService::OnTcpMessageReceived(RequestId id, const QByteArray &data)
     }
 
     LOG_INFO() << "AuthService: login success";
-    emit sigLoginSuccess();
+    emit SigLoginSuccess();
 }

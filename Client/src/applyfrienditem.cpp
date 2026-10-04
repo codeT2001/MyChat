@@ -1,8 +1,8 @@
 #include "applyfrienditem.h"
 #include "ui_applyfrienditem.h"
 #include "utils.h"
-#include "userdata.h"
-#include "log.h"
+#include "domainmodels.h"
+#include "logger.h"
 #include <QPushButton>
 #include <QStyle>
 ApplyFriendItem::ApplyFriendItem(QWidget *parent) : ListItemBase(parent), ui(new Ui::ApplyFriendItem)
@@ -19,7 +19,7 @@ ApplyFriendItem::ApplyFriendItem(QWidget *parent) : ListItemBase(parent), ui(new
             return;
         }
         LOG_DEBUG() << info_->name_ << "clicked";
-        emit this->sigAuthFriend(info_);
+        emit this->SigAcceptFriend(info_);
     });
 }
 
@@ -38,12 +38,12 @@ void ApplyFriendItem::SetInfo(std::shared_ptr<ApplyInfo> info)
     ui->msgLb->setText(info_->desc_);
 }
 
-void ApplyFriendItem::ShowAddBtn(bool bshow)
+void ApplyFriendItem::SetPendingUI(bool pending)
 {
-    if (bshow) {
+    if (pending) {
         ui->addFriendBtn->show();
         ui->statusLb->hide();
-        added_ = false;
+        handled_ = false;
     } else {
         ui->addFriendBtn->hide();
         ui->statusLb->setText(tr("已添加"));
@@ -51,7 +51,7 @@ void ApplyFriendItem::ShowAddBtn(bool bshow)
         ui->statusLb->style()->unpolish(ui->statusLb);
         ui->statusLb->style()->polish(ui->statusLb);
         ui->statusLb->show();
-        added_ = true;
+        handled_ = true;
     }
 }
 
@@ -63,7 +63,7 @@ void ApplyFriendItem::ShowRejected()
     ui->statusLb->style()->unpolish(ui->statusLb);
     ui->statusLb->style()->polish(ui->statusLb);
     ui->statusLb->show();
-    added_ = true;
+    handled_ = true;
 }
 
 int ApplyFriendItem::GetUid()

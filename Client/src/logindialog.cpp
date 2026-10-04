@@ -2,7 +2,7 @@
 #include "authservice.h"
 #include "ui_logindialog.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::LoginDialog)
@@ -40,20 +40,20 @@ void LoginDialog::SetupWindow()
 
 void LoginDialog::SetupConnections()
 {
-    connect(ui->registerBtn, &QPushButton::clicked, this, &LoginDialog::SwitchRegister);
-    connect(ui->forgetLabel, &QClickLabel::clicked, this, &LoginDialog::SwitchReset);
+    connect(ui->registerBtn, &QPushButton::clicked, this, &LoginDialog::SigSwitchRegister);
+    connect(ui->forgetLabel, &StatefulClickLabel::clicked, this, &LoginDialog::SigSwitchReset);
     connect(ui->loginBtn, &QPushButton::clicked, this, &LoginDialog::OnLoginBtnClicked);
     // 监听 AuthService 的结果信号（不再直接依赖 HttpManager/TcpManager）
     auto &authService = AuthService::GetInstance();
-    connect(&authService, &AuthService::sigLoginFailed, this, &LoginDialog::OnLoginFailed);
-    connect(&authService, &AuthService::sigLoginError, this, &LoginDialog::OnLoginError);
+    connect(&authService, &AuthService::SigLoginFailed, this, &LoginDialog::OnLoginFailed);
+    connect(&authService, &AuthService::SigLoginError, this, &LoginDialog::OnLoginError);
 }
 
 void LoginDialog::SetupPasswordToggle()
 {
-    ui->forgetLabel->SetState("normal", "hover");
-    ui->loginPassLb->SetState("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
-    connect(ui->loginPassLb, &QClickLabel::clicked, this, [this]() {
+    ui->forgetLabel->SetStateStyles("normal", "hover");
+    ui->loginPassLb->SetStateStyles("unvisible", "unvisible_hover", "", "visible", "visible_hover", "");
+    connect(ui->loginPassLb, &StatefulClickLabel::clicked, this, [this]() {
         ui->password->setEchoMode(ui->loginPassLb->GetCurState() == ClickLabelState::NORMAL ? QLineEdit::Password
                                                                                             : QLineEdit::Normal);
     });

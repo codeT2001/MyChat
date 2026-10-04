@@ -1,6 +1,6 @@
 #include "usermanager.h"
-#include "userdata.h"
-#include "log.h"
+#include "domainmodels.h"
+#include "logger.h"
 #include <QtMath>
 namespace {
 constexpr int CHAT_COUNT_PER_PAGE = 13;
@@ -18,13 +18,6 @@ std::shared_ptr<UserInfo> UserManager::GetUserInfo() const
 }
 
 UserManager::UserManager() {}
-
-void UserManager::SlotFriendAuth(std::shared_ptr<FriendInfo> info)
-{
-    if (info) {
-        AddFriend(info);
-    }
-}
 
 void UserManager::SetToken(const QString &token)
 {
@@ -99,12 +92,12 @@ void UserManager::AddApply(std::shared_ptr<ApplyInfo> info)
     }
 }
 
-std::vector<std::shared_ptr<FriendInfo>> UserManager::GetChatListPerPage()
+std::vector<std::shared_ptr<FriendInfo>> UserManager::GetFriendsPerPage(int &loadedCount)
 {
     std::vector<std::shared_ptr<FriendInfo>> list;
 
     const int total = static_cast<int>(friendMap_.size());
-    int begin = chatLoaded_;
+    int begin = loadedCount;
 
     if (begin >= total) {
         return list;
@@ -121,62 +114,14 @@ std::vector<std::shared_ptr<FriendInfo>> UserManager::GetChatListPerPage()
     for (int i = begin; i < end && it != friendMap_.end(); ++i, ++it) {
         list.push_back(it->second); // map 的 value 是 shared_ptr<FriendInfo>
     }
+
+    loadedCount = end;
     return list;
 }
 
-bool UserManager::IsLoadChatFinish()
+bool UserManager::IsFriendListExhausted(int loadedCount) const
 {
-    return chatLoaded_ >= friendMap_.size();
-}
-
-void UserManager::UpdateChatLoadedCount()
-{
-    int begin = chatLoaded_;
-    if (begin >= friendMap_.size()) {
-        return;
-    }
-
-    chatLoaded_ = qMin((int)friendMap_.size(), begin + CHAT_COUNT_PER_PAGE);
-}
-
-std::vector<std::shared_ptr<FriendInfo>> UserManager::GetContactListPerPage()
-{
-    std::vector<std::shared_ptr<FriendInfo>> list;
-
-    const int total = static_cast<int>(friendMap_.size());
-    int begin = contactLoaded_;
-
-    if (begin >= total) {
-        return list;
-    }
-
-    int end = begin + CHAT_COUNT_PER_PAGE;
-    if (end > total) {
-        end = total;
-    }
-
-    auto it = friendMap_.begin();
-    std::advance(it, begin); // 移动到 begin 位置
-
-    for (int i = begin; i < end && it != friendMap_.end(); ++i, ++it) {
-        list.push_back(it->second); // map 的 value 是 shared_ptr<FriendInfo>
-    }
-    return list;
-}
-
-void UserManager::UpdateContactLoadedCount()
-{
-    int begin = contactLoaded_;
-    if (begin >= friendMap_.size()) {
-        return;
-    }
-
-    contactLoaded_ = qMin((int)friendMap_.size(), begin + CHAT_COUNT_PER_PAGE);
-}
-
-bool UserManager::IsLoadContactFinish()
-{
-    return contactLoaded_ >= friendMap_.size();
+    return loadedCount >= static_cast<int>(friendMap_.size());
 }
 
 bool UserManager::CheckFriendById(int uid)
@@ -184,7 +129,7 @@ bool UserManager::CheckFriendById(int uid)
     return friendMap_.find(uid) != friendMap_.end();
 }
 
-void UserManager::AddFriend(std::shared_ptr<AuthPeerInfo> auth_info)
+void UserManager::AddFriend(std::shared_ptr<AcceptPeerInfo> auth_info)
 {
     auto info = std::make_shared<FriendInfo>(auth_info);
     friendMap_[info->uid_] = info;

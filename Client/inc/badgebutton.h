@@ -10,11 +10,11 @@ public:
     ~BadgeButton();
 
     // 显示/隐藏红点
-    void setShowBadge(bool show);
-    bool isBadgeShown() const;
+    void SetShowBadge(bool show);
+    bool IsBadgeShown() const;
 
     // (可选) 设置红点大小，默认 10
-    void setBadgeSize(int size);
+    void SetBadgeSize(int size);
 
 protected:
     void paintEvent(QPaintEvent *event) override;

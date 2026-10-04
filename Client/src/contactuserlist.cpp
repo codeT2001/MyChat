@@ -5,13 +5,13 @@
 #include <QMovie>
 #include <QTimer>
 #include <QLabel>
-#include "grouptipitem.h"
+#include "contactsectionheader.h"
 #include "contactuseritem.h"
 #include "friendservice.h"
-#include "userdata.h"
+#include "domainmodels.h"
 #include "usermanager.h"
 #include "utils.h"
-#include "log.h"
+#include "logger.h"
 namespace {
 
 // 条目身份数据挂在 QListWidgetItem 上（widget 为纯视图）：
@@ -30,21 +30,21 @@ ContactUserList::ContactUserList(QWidget *parent) : QListWidget(parent)
 
     // 装配固定条目 + 加载第一页联系人
     InitList();
-    AddContactList();
+    LoadContactPage();
     // 连接点击的信号和槽
-    connect(this, &QListWidget::itemClicked, this, &ContactUserList::SlotItemClicked);
+    connect(this, &QListWidget::itemClicked, this, &ContactUserList::OnItemClicked);
     // 好友认证完成（对端同意或自己同意）后刷新通讯录
-    connect(&FriendService::GetInstance(), &FriendService::SigFriendAuth, this, &ContactUserList::SlotFriendAuth);
+    connect(&FriendService::GetInstance(), &FriendService::SigFriendAccepted, this, &ContactUserList::OnFriendAccepted);
 }
 
-void ContactUserList::ShowRedPoint(bool bshow /*= true*/)
+void ContactUserList::ShowNewFriendBadge(bool show /*= true*/)
 {
-    newFriendItem_->ShowRedPoint(bshow);
+    newFriendItem_->ShowRedPoint(show);
 }
 
 void ContactUserList::InitList()
 {
-    auto *groupTip = new GroupTipItem();
+    auto *groupTip = new ContactSectionHeader();
     QListWidgetItem *item = new QListWidgetItem;
     item->setSizeHint(groupTip->sizeHint());
     this->addItem(item);
@@ -79,7 +79,7 @@ void ContactUserList::InitList()
     this->addItem(self_list_item);
     this->setItemWidget(self_list_item, selfItem);
 
-    auto *groupCon = new GroupTipItem();
+    auto *groupCon = new ContactSectionHeader();
     groupCon->SetGroupTip(tr("联系人"));
     groupItem_ = new QListWidgetItem;
     groupItem_->setSizeHint(groupCon->sizeHint());
@@ -88,10 +88,9 @@ void ContactUserList::InitList()
     groupItem_->setFlags(groupItem_->flags() & ~Qt::ItemIsSelectable);
 }
 
-void ContactUserList::AddContactList()
+void ContactUserList::LoadContactPage()
 {
-    auto list = UserManager::GetInstance().GetContactListPerPage();
-    UserManager::GetInstance().UpdateContactLoadedCount();
+    auto list = UserManager::GetInstance().GetFriendsPerPage(loadedCount_);
     for (const auto &e : list) {
         if (addedUids_.contains(e->uid_)) {
             continue;
@@ -118,7 +117,7 @@ void ContactUserList::LoadMoreUsers()
     if (!movie->isValid()) {
         LOG_WARN() << "Invalid GIF format";
         delete movie;
-        m_loadingPending = false;
+        loadingPending_ = false;
         return;
     }
 
@@ -137,7 +136,7 @@ void ContactUserList::LoadMoreUsers()
 
     QTimer::singleShot(1000, this, [this, item, loadingLabel, movie]() {
         LOG_DEBUG() << "=== Finish Loading Contact Users, Cleaning up ===";
-        AddContactList();
+        LoadContactPage();
         int row = this->row(item);
         QListWidgetItem *takenItem = this->takeItem(row);
         if (takenItem) {
@@ -149,7 +148,7 @@ void ContactUserList::LoadMoreUsers()
         movie->stop();
         movie->deleteLater();
         this->update();
-        m_loadingPending = false;
+        loadingPending_ = false;
     });
 }
 
@@ -181,10 +180,10 @@ bool ContactUserList::eventFilter(QObject *watched, QEvent *event)
         int currentValue = scrollBar->value();
         // int pageSize = 10; // 每页加载的联系人数量
 
-        if (maxScrollValue - currentValue <= 0 && !m_loadingPending &&
-            !UserManager::GetInstance().IsLoadContactFinish()) {
+        if (maxScrollValue - currentValue <= 0 && !loadingPending_ &&
+            !UserManager::GetInstance().IsFriendListExhausted(loadedCount_)) {
             // 滚动到底部，加载新的联系人
-            m_loadingPending = true;
+            loadingPending_ = true;
             LOG_DEBUG() << "load more contact user";
             LoadMoreUsers();
         }
@@ -195,7 +194,7 @@ bool ContactUserList::eventFilter(QObject *watched, QEvent *event)
     return QListWidget::eventFilter(watched, event);
 }
 
-void ContactUserList::SlotItemClicked(QListWidgetItem *item)
+void ContactUserList::OnItemClicked(QListWidgetItem *item)
 {
     if (!item) {
         return;
@@ -231,7 +230,7 @@ void ContactUserList::SlotItemClicked(QListWidgetItem *item)
     }
 }
 
-void ContactUserList::SlotFriendAuth(std::shared_ptr<FriendInfo> info)
+void ContactUserList::OnFriendAccepted(std::shared_ptr<FriendInfo> info)
 {
     if (!info) {
         return;

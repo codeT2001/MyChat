@@ -1,7 +1,5 @@
 #include "mainwindow.h"
-#include "applyfrienddialog.h"
-#include "chatwindow.h"
-#include "log.h"
+#include "mainpanel.h"
 #include "logger.h"
 #include <QApplication>
 #include <QCoreApplication>
@@ -9,7 +7,7 @@
 #include <QFile>
 #include <QTextStream>
 // 解耦网络处理层，UI层，JSON处理层，工具层
-#define NO_DEBUG 1
+#define USE_FULL_LOGIN_FLOW 1
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
@@ -30,10 +28,10 @@ int main(int argc, char *argv[])
     } else {
         LOG_WARN() << "Open stylesheet failed";
     }
-#if NO_DEBUG
+#if USE_FULL_LOGIN_FLOW
     MainWindow w;
 #else
-    ChatWindow w;
+    MainPanel w;
 #endif
     w.show();
     return a.exec();

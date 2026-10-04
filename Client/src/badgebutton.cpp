@@ -9,7 +9,7 @@ BadgeButton::BadgeButton(QWidget *parent) : QPushButton(parent), showBadge_(fals
 
 BadgeButton::~BadgeButton() {}
 
-void BadgeButton::setShowBadge(bool show)
+void BadgeButton::SetShowBadge(bool show)
 {
     if (showBadge_ != show) {
         showBadge_ = show;
@@ -17,12 +17,12 @@ void BadgeButton::setShowBadge(bool show)
     }
 }
 
-bool BadgeButton::isBadgeShown() const
+bool BadgeButton::IsBadgeShown() const
 {
     return showBadge_;
 }
 
-void BadgeButton::setBadgeSize(int size)
+void BadgeButton::SetBadgeSize(int size)
 {
     if (badgeSize_ != size && size > 0) {
         badgeSize_ = size;

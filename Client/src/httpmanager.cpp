@@ -1,5 +1,5 @@
 #include "httpmanager.h"
-#include "log.h"
+#include "logger.h"
 #include <QJsonDocument>
 #include <QNetworkReply>
 

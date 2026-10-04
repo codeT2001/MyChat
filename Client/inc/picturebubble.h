@@ -6,7 +6,7 @@
 class PictureBubble : public BubbleFrame {
     Q_OBJECT
 public:
-    explicit PictureBubble(const QPixmap &pciture, bool self = true, QWidget *parent = nullptr);
+    explicit PictureBubble(const QPixmap &picture, bool self = true, QWidget *parent = nullptr);
 };
 
 #endif // PICTUREBUBBLE_H

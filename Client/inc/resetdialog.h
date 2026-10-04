@@ -20,7 +20,7 @@ public Q_SLOTS:
     void OnVerifyCodeResult(bool ok, const QString &msg);
     void OnResetResult(bool ok, const QString &msg);
 Q_SIGNALS:
-    void SwitchLogin();
+    void SigSwitchLogin();
 
 private:
     // Setup methods

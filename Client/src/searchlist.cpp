@@ -4,14 +4,14 @@
 #include <QScrollBar>
 #include <friendservice.h>
 #include <QLineEdit>
-#include "userdata.h"
+#include "domainmodels.h"
 #include "usermanager.h"
-#include "adduseritem.h"
-#include "findsuccessdialog.h"
+#include "searchentryitem.h"
+#include "searchresultdialog.h"
 #include "loadingdialog.h"
-#include "log.h"
+#include "logger.h"
 SearchList::SearchList(QWidget *parent)
-    : QListWidget(parent), findSuccessDialog_(nullptr), searchEdit_(nullptr), searchPending_(false)
+    : QListWidget(parent), searchResultDialog_(nullptr), searchEdit_(nullptr), searchPending_(false)
 {
     Q_UNUSED(parent);
     loadingDialog_ = new LoadingDialog(this);
@@ -20,11 +20,11 @@ SearchList::SearchList(QWidget *parent)
     // 安装事件过滤器
     this->viewport()->installEventFilter(this);
     // 连接点击的信号和槽
-    connect(this, &QListWidget::itemClicked, this, &SearchList::SlotItemClicked);
+    connect(this, &QListWidget::itemClicked, this, &SearchList::OnItemClicked);
     // 添加条目
-    //  AddTipItem();
+    //  AddSearchEntryItem();
     // 连接搜索条目
-    connect(&FriendService::GetInstance(), &FriendService::SigUserSearch, this, &SearchList::SlotUserSearch);
+    connect(&FriendService::GetInstance(), &FriendService::SigUserSearch, this, &SearchList::OnUserSearch);
 }
 
 void SearchList::SetSearchEdit(QWidget *w)
@@ -59,7 +59,7 @@ bool SearchList::eventFilter(QObject *watched, QEvent *event)
     return QListWidget::eventFilter(watched, event);
 }
 
-void SearchList::SlotItemClicked(QListWidgetItem *item)
+void SearchList::OnItemClicked(QListWidgetItem *item)
 {
     QWidget *widget = this->itemWidget(item);
     if (!widget) {
@@ -78,11 +78,11 @@ void SearchList::SlotItemClicked(QListWidgetItem *item)
         return;
     }
 
-    if (itemType == ListItemType::ADD_USER_TIP_ITEM) {
+    if (itemType == ListItemType::SEARCH_ENTRY_ITEM) {
         if (searchPending_ || (!searchEdit_)) {
             return;
         }
-        WaitPending(true);
+        SetSearchPending(true);
         if (QLineEdit *edit = qobject_cast<QLineEdit *>(searchEdit_)) {
             // 转换成功，安全使用 edit
             QString text = edit->text();
@@ -101,20 +101,20 @@ void SearchList::SlotItemClicked(QListWidgetItem *item)
     }
 }
 
-void SearchList::CloseFindSuccessDialog()
+void SearchList::CloseSearchResultDialog()
 {
-    if (findSuccessDialog_) {
-        findSuccessDialog_->hide();
-        findSuccessDialog_->deleteLater();
-        findSuccessDialog_ = nullptr;
+    if (searchResultDialog_) {
+        searchResultDialog_->hide();
+        searchResultDialog_->deleteLater();
+        searchResultDialog_ = nullptr;
     }
 }
-void SearchList::SlotUserSearch(std::shared_ptr<SearchInfo> info)
+void SearchList::OnUserSearch(std::shared_ptr<SearchInfo> info)
 {
-    WaitPending(false);
+    SetSearchPending(false);
     if (!info) {
-        findSuccessDialog_ = new FindSuccessDialog(false, this);
-        findSuccessDialog_->show();
+        searchResultDialog_ = new SearchResultDialog(false, this);
+        searchResultDialog_->show();
         return;
     }
     if (info->uid_ == UserManager::GetInstance().GetUid()) {
@@ -125,12 +125,12 @@ void SearchList::SlotUserSearch(std::shared_ptr<SearchInfo> info)
         emit SigJumpToChat(info->uid_);
         return;
     }
-    findSuccessDialog_ = new FindSuccessDialog(true, this);
-    findSuccessDialog_->SetSearchInfo(info);
-    findSuccessDialog_->show();
+    searchResultDialog_ = new SearchResultDialog(true, this);
+    searchResultDialog_->SetSearchInfo(info);
+    searchResultDialog_->show();
 }
 
-void SearchList::WaitPending(bool pending)
+void SearchList::SetSearchPending(bool pending)
 {
     if (pending) {
         loadingDialog_->Start();
@@ -142,7 +142,7 @@ void SearchList::WaitPending(bool pending)
     searchPending_ = pending;
 }
 
-void SearchList::AddTipItem()
+void SearchList::AddSearchEntryItem()
 {
     // auto *invalidItem = new QWidget();
     // QListWidgetItem *itemTmp = new QListWidgetItem;
@@ -152,13 +152,13 @@ void SearchList::AddTipItem()
     // this->setItemWidget(itemTmp, invalidItem);
     // itemTmp->setFlags(itemTmp->flags() & ~Qt::ItemIsSelectable);
 
-    LOG_DEBUG() << "SearchList::AddTipItem()";
-    auto *addUserItem = new AddUserItem(this);
+    LOG_DEBUG() << "SearchList::AddSearchEntryItem()";
+    auto *entryItem = new SearchEntryItem(this);
     QListWidgetItem *item = new QListWidgetItem;
     // qDebug()<<"chat_user_wid sizeHint is " << chat_user_wid->sizeHint();
-    item->setSizeHint(addUserItem->sizeHint());
+    item->setSizeHint(entryItem->sizeHint());
     this->addItem(item);
-    this->setItemWidget(item, addUserItem);
+    this->setItemWidget(item, entryItem);
 }
 
 void SearchList::showEvent(QShowEvent *event)
@@ -167,11 +167,11 @@ void SearchList::showEvent(QShowEvent *event)
     LOG_DEBUG() << ">>> SearchList 显示出来了！";
     LOG_DEBUG() << ">>> 当前 Item 数量:" << this->count();
 
-    // 2. 检查是否还包含那个 TipItem
+    // 2. 检查是否还包含那个入口条目
     // 如果这里 count() 是 0，说明在切换过程中列表被清空了，或者根本没初始化
     if (this->count() == 0) {
-        LOG_DEBUG() << ">>> 警告：列表是空的！可能需要重新 AddTipItem()";
-        AddTipItem(); // 可以在这里补救
+        LOG_DEBUG() << ">>> 警告：列表是空的！可能需要重新 AddSearchEntryItem()";
+        AddSearchEntryItem(); // 可以在这里补救
     }
 
     // 3. 调用父类函数（很重要，不要漏掉）

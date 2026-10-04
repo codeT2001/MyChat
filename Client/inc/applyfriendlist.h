@@ -10,10 +10,6 @@ public:
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
-
-private slots:
-signals:
-    void SigShowSearch(bool);
 };
 
 #endif // APPLYFRIENDLIST_H

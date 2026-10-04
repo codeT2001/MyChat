@@ -28,20 +28,19 @@ public:
     // 主动断开连接（用户退出时调用，阻止自动重连）
     void Disconnect();
 
-public slots:
-    void SlotTcpConnect(ServerInfo);
-    void SlotSendData(RequestId id, const QByteArray &data);
+    // 连接指定聊天服务器（未连接状态下生效）
+    void Connect(ServerInfo serverInfo);
+    // 发送一条完整报文（自动加 msgId+length 包头）
+    void Send(RequestId id, const QByteArray &data);
 
 signals:
-    void SigConnectionSuccess(bool success);
-    void SigSendData(RequestId id, const QByteArray &data);
+    void SigConnected();
     void SigReconnectFailed(); // 重连彻底失败（超过最大次数）
     // 收到完整报文后向业务层转发原始数据，由 Service 解析
     void SigMessageReceived(RequestId id, const QByteArray &data);
 
 private:
     DISALLOW_COPY_MOVE(TcpManager)
-    void InitHandlers();
     void HandleMsg(RequestId id, int32_t len, const QByteArray &data);
     // 连接生命周期管理
     void StartHeartbeat();
@@ -55,7 +54,7 @@ private:
     QString host_;
     uint16_t port_;
     QByteArray buffer_;
-    bool recvPedding_;
+    bool recvPending_;
     uint16_t msgId_;
     uint16_t msgLength_;
 
