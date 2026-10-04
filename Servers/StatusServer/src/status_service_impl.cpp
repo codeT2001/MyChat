@@ -182,7 +182,5 @@ void StatusServiceImpl::RefreshCache()
         servers_ = std::move(snapshot);
         minServer_ = minServer;
     }
-    LOG_DEBUG("[StatusServer] cache refreshed, selected:%s, conns:%d",
-        minServer.name.c_str(), minServer.con_count);
 }
 } // namespace P1
