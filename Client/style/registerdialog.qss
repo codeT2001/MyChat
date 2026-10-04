@@ -1,0 +1,36 @@
+/* ========== RegisterDialog 注册对话框 ========== */
+QDialog#RegisterDialog {
+   background-color:rgb(255,255,255)
+}
+
+QLabel#regErrTip {
+   background-color:rgb(255,255,255)
+}
+
+#passLabel[state='unvisible']{
+   border-image: url(:/images/unvisible.png);
+}
+
+#passLabel[state='unvisible_hover']{
+   border-image: url(:/images/unvisible_hover.png);
+}
+
+#passLabel[state='visible']{
+   border-image: url(:/images/visible.png);
+}
+
+#passLabel[state='visible_hover']{
+   border-image: url(:/images/visible_hover.png);
+}
+
+#confirmLabel[state='unvisible']{
+   border-image: url(:/images/unvisible.png);
+}
+
+#confirmLabel[state='unvisible_hover']{
+   border-image: url(:/images/unvisible_hover.png);
+}
+
+#confirmLabel[state='visible']{
+   border-image: url(:/images/visible.png);
+}

@@ -1,0 +1,35 @@
+/* ========== FriendLabel 好友标签（点击切换选中态） ========== */
+#FriendLabel {
+    border-radius: 4px;
+}
+
+#FriendLabel[state='normal'] {
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+#FriendLabel[state='normal']:hover {
+    background-color: #eef2f7;
+    border-color: #cbd5e1;
+}
+
+#FriendLabel[state='selected'] {
+    background-color: #eff6ff;
+    border: 1px solid #3b82f6;
+}
+
+#FriendLabel[state='selected']:hover {
+    background-color: #dbeafe;
+    border-color: #2563eb;
+}
+
+#FriendLabel #tipLb {
+    background: transparent;
+    border: none;
+    color: #475569;
+    font: 12px "Microsoft YaHei";
+}
+
+#FriendLabel[state='selected'] #tipLb {
+    color: #1d4ed8;
+}

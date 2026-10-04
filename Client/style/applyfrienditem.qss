@@ -1,0 +1,61 @@
+/* ========== ApplyFriendItem 好友申请条目 ========== */
+#ApplyFriendItem {
+    background-color: #ffffff;
+    border: 1px solid #f1f5f9;
+    border-radius: 8px;
+}
+
+#ApplyFriendItem:hover {
+    background-color: #f8fafc;
+    border-color: #e2e8f0;
+}
+
+#ApplyFriendItem #iconLb {
+    border-radius: 8px;
+    background-color: #f1f5f9;
+    border: 2px solid #e2e8f0;
+}
+
+#ApplyFriendItem #nameLb {
+    color: #1e293b;
+    font: bold 14px "Microsoft YaHei";
+}
+
+#ApplyFriendItem #msgLb {
+    color: #64748b;
+    font: 12px "Microsoft YaHei";
+}
+
+#ApplyFriendItem #addFriendBtn {
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font: bold 13px "Microsoft YaHei";
+    padding: 0 12px;
+}
+
+#ApplyFriendItem #addFriendBtn:hover {
+    background-color: #2563eb;
+}
+
+#ApplyFriendItem #addFriendBtn:pressed {
+    background-color: #1d4ed8;
+}
+
+#ApplyFriendItem #statusLb {
+    color: #94a3b8;
+    font: 12px "Microsoft YaHei";
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+#ApplyFriendItem #statusLb[state="added"] {
+    color: #059669;
+    background-color: #dcfce7;
+}
+
+#ApplyFriendItem #statusLb[state="rejected"] {
+    color: #dc2626;
+    background-color: #fee2e2;
+}

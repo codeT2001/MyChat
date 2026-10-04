@@ -1,0 +1,33 @@
+# StatusServer 配置模板
+# 用法：cp config.ini.example config.ini，填入本机真实值。
+# config.ini 已被 .gitignore 忽略（不入库），可以直接写明文口令；
+# 本模板入库，只能放假值，禁止填真实凭据。
+
+[StatusServer]
+Host = 127.0.0.1
+Port = 50052
+
+[Redis]
+Host = 127.0.0.1
+Port = 6379
+
+[MySQL]
+Host = 127.0.0.1
+Port = 3306
+User = your_mysql_user
+Pwd = your_mysql_password
+Schema = chat_db
+PoolMaxSize = 5
+
+[ChatServers]
+Name = ChatServer1,ChatServer2
+
+[ChatServer1]
+Name = ChatServer1
+Host = 127.0.0.1
+Port = 50061
+
+[ChatServer2]
+Name = ChatServer2
+Host = 127.0.0.1
+Port = 50062

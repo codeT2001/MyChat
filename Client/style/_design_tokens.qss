@@ -1,0 +1,62 @@
+/* ============================================
+ * ChatClient 设计规范 (Design Tokens)
+ * ============================================
+ * Qt QSS 不支持 CSS 变量，本文件仅作为规范参考。
+ * 所有 .qss 文件中的值应对照此规范保持一致。
+ * ============================================ */
+
+/* ---------- 品牌色 ---------- */
+/* Primary Blue */
+/* 主按钮、焦点边框、主交互色 */
+/* #3b82f6  normal */
+/* #2563eb  hover   */
+/* #1d4ed8  pressed */
+/* #d1d5db  disabled */
+
+/* Success Green */
+/* 成功状态、添加按钮 */
+/* #10b981  normal */
+/* #059669  hover   */
+/* #047857  pressed */
+
+/* Error Red */
+/* 拒绝状态、错误提示 */
+/* #dc2626  normal */
+/* #fee2e2  background */
+
+/* ---------- 中性色 ---------- */
+/* 背景层级 */
+/* #ffffff  卡片背景 */
+/* #f8fafc  页面背景、列表背景 */
+/* #f1f5f9  hover 背景、输入框背景 */
+/* #e2e8f0  默认边框、分割线 */
+/* #cbd5e1  hover 边框 */
+/* #94a3b8  占位符、辅助文字 */
+/* #64748b  次要文字 */
+/* #475569  标签文字 */
+/* #1e293b  主标题、主文字 */
+
+/* ---------- 圆角 ---------- */
+/* 4px   标签、小徽章 (friendlabel, statusLb) */
+/* 6px   按钮、输入框 (button, input, toolWidget) */
+/* 8px   卡片、图标框 (userwidget, applyfrienditem, iconLb) */
+/* 12px  对话框、面板 (dialog, searchWidget) */
+/* 18px  搜索框 (searchEdit) */
+/* 50%   圆形头像 (iconLb in findsuccessdialog) */
+
+/* ---------- 字体大小 ---------- */
+/* 11px  时间戳、极次要信息 (timeLb) */
+/* 12px  辅助文字、状态标签 (msgLb, statusLb) */
+/* 13px  按钮文字、输入框文字 (button, input) */
+/* 14px  正文、名字 (nameLb, chatEdit) */
+/* 16px  对话框标题 (titleLabel) */
+/* 18px  页面大标题 (headerLabel, newFriendLb) */
+
+/* ---------- 字体族 ---------- */
+/* "Microsoft YaHei"  中文主字体 */
+/* 所有文字统一使用该字体，保持一致性 */
+
+/* ---------- 间距/内边距 ---------- */
+/* 按钮: padding 0 12px ~ 0 20px */
+/* 输入框: padding 4px 10px ~ 8px */
+/* 卡片内部: padding 0px ~ 8px */

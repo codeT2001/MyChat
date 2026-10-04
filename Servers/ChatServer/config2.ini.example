@@ -1,0 +1,41 @@
+# ChatServer 实例 2 配置模板
+# 用法：cp config2.ini.example config2.ini，填入本机真实值。
+# config2.ini 已被 .gitignore 忽略（不入库），可以直接写明文口令；
+# 本模板入库，只能放假值，禁止填真实凭据。
+
+[GateServer]
+Port = 9090
+
+[VerifyServer]
+Host = 127.0.0.1
+Port = 50051
+
+[StatusServer]
+Host = 127.0.0.1
+Port = 50052
+
+[Redis]
+Host = 127.0.0.1
+Port = 6379
+
+[MySQL]
+Host = 127.0.0.1
+Port = 3306
+User = your_mysql_user
+Pwd = your_mysql_password
+Schema = chat_db
+PoolMaxSize = 5
+
+[SelfServer]
+Name = ChatServer2
+Host = 127.0.0.1
+Port = 50062
+RPCPort = 50082
+
+[PeerServer]
+servers = ChatServer1
+
+[ChatServer1]
+Name = ChatServer1
+Host = 127.0.0.1
+RPCPort = 50081

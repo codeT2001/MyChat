@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package message;
+
+// ===== Verify 服务（邮箱验证码） =====
+message GetVerifyReq {
+  string email = 1;
+}
+
+message GetVerifyRsp {
+  int32 error = 1;
+  string email = 2;
+  string code = 3;
+}
+
+service VerifyService {
+  rpc GetVerifyCode(GetVerifyReq) returns (GetVerifyRsp) {}
+}
+
+// ===== Status 服务（token 颁发 / 校验 / 路由） =====
+message GetChatServerReq {
+  int32 uid = 1;
+}
+
+message GetChatServerRsp {
+  int32 error = 1;
+  string host = 2;
+  string port = 3;
+  string token = 4;
+}
+
+message LoginReq {
+  int32 uid = 1;
+  string token = 2;
+}
+
+message LoginRsp {
+  int32 error = 1;
+  int32 uid = 2;
+  string token = 3;
+}
+
+service StatusService {
+  rpc GetChatServer(GetChatServerReq) returns (GetChatServerRsp) {}
+  rpc Login(LoginReq) returns (LoginRsp) {}
+}
+
+// ===== Chat 服务（跨 server 推送 / 通知） =====
+
+// --- 加好友 ---
+message AddFriendReq {
+  int32 apply_uid = 1;   // 申请人 uid
+  string name = 2;
+  string desc = 3;
+  string icon = 4;
+  string nick = 5;
+  int32 sex = 6;
+  int32 to_uid = 7;      // 接收人 uid
+}
+
+message AddFriendRsp {
+  int32 error = 1;
+  int32 apply_uid = 2;
+  int32 to_uid = 3;
+}
+
+// --- 回复好友申请 ---
+message ReplyFriendReq {
+  int32 reply_uid = 1;   // 回复人 uid
+  bool agree = 2;
+  int32 to_uid = 3;      // 被回复人 uid
+}
+
+message ReplyFriendRsp {
+  int32 error = 1;
+  int32 reply_uid = 2;
+  int32 to_uid = 3;
+}
+
+// --- 转发聊天消息 ---
+message SendChatMsgReq {
+  int32 from_uid = 1;
+  int32 to_uid = 2;
+  string content = 3;    // 原 message（proto 关键字），改名 content
+}
+
+message SendChatMsgRsp {
+  int32 error = 1;
+  int32 from_uid = 2;
+  int32 to_uid = 3;
+}
+
+// --- 通用消息数据（合并原 AddFriendMsg + TextChatData） ---
+message ChatMsgData {
+  string unique_id = 1;
+  string msg_id = 2;
+  string msg_content = 3;
+  int32 sender_id = 4;
+  int32 thread_id = 5;
+  int32 status = 6;
+  string chat_time = 7;
+}
+
+// --- 好友关系建立通知 ---
+message FriendAcceptedReq {
+  int32 from_uid = 1;
+  int32 to_uid = 2;
+  repeated ChatMsgData msgs = 3;
+  int32 action = 4;   // 1=同意 2=拒绝，默认 0 按同意兼容
+}
+
+message FriendAcceptedRsp {
+  int32 error = 1;
+  int32 from_uid = 2;
+  int32 to_uid = 3;
+}
+
+// --- 文本聊天消息推送 ---
+message TextChatMsgReq {
+  int32 from_uid = 1;
+  int32 to_uid = 2;
+  int32 thread_id = 3;
+  repeated ChatMsgData msgs = 4;
+}
+
+message TextChatMsgRsp {
+  int32 error = 1;
+  int32 from_uid = 2;
+  int32 to_uid = 3;
+  int32 thread_id = 4;
+  repeated ChatMsgData msgs = 5;
+}
+
+// --- 踢下线 ---
+message KickUserReq {
+  int32 uid = 1;
+}
+
+message KickUserRsp {
+  int32 error = 1;
+  int32 uid = 2;
+}
+
+service ChatService {
+  // 通知对端"有人申请加你为好友"
+  rpc NotifyAddFriend(AddFriendReq) returns (AddFriendRsp) {}
+  // 回复好友申请（同意 / 拒绝）
+  rpc ReplyFriend(ReplyFriendReq) returns (ReplyFriendRsp) {}
+  // 转发聊天消息
+  rpc SendChatMsg(SendChatMsgReq) returns (SendChatMsgRsp) {}
+  // 通知对端"好友申请已通过"
+  rpc NotifyFriendAccepted(FriendAcceptedReq) returns (FriendAcceptedRsp) {}
+  // 推送文本/数据聊天消息
+  rpc NotifyTextChatMsg(TextChatMsgReq) returns (TextChatMsgRsp) {}
+  // 踢下线通知
+  rpc NotifyKickUser(KickUserReq) returns (KickUserRsp) {}
+}

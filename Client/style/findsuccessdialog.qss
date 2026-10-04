@@ -1,0 +1,33 @@
+/* ========== FindSuccessDialog 查找用户结果弹窗 ========== */
+QDialog#FindSuccessDialog {
+    background-color: #eff6ff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+
+#FindSuccessDialog #iconLb {
+    border-radius: 50%;
+    background-color: #f1f5f9;
+    border: 2px solid #3b82f6;
+}
+
+#FindSuccessDialog #nameLb {
+    color: #1e293b;
+    font-family: "Microsoft YaHei";
+    text-align: center;
+}
+
+QPushButton#addFriendBtn {
+    background-color: #10b981;
+    color: white;
+    border: none;
+    border-radius: 6px;
+}
+
+QPushButton#addFriendBtn:hover {
+    background-color: #059669;
+}
+
+QPushButton#addFriendBtn:pressed {
+    background-color: #047857;
+}

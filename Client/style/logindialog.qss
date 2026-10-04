@@ -1,0 +1,36 @@
+/* ========== LoginDialog 登录对话框 ========== */
+QDialog#LoginDialog {
+   background-color:rgb(255,255,255)
+}
+
+QLabel#loginErrTip {
+   background-color:rgb(255,255,255)
+}
+
+#forgetLabel[state='hover']{
+   color: blue;
+}
+
+#forgetLabel[state='normal']{
+   color: black;
+}
+
+#loginPassLb[state='visible_hover']{
+   border-image: url(:/images/visible_hover.png);
+}
+
+#loginPassLb[state='unvisible']{
+   border-image: url(:/images/unvisible.png);
+}
+
+#loginPassLb[state='unvisible_hover']{
+   border-image: url(:/images/unvisible_hover.png);
+}
+
+#loginPassLb[state='visible']{
+   border-image: url(:/images/visible.png);
+}
+
+#loginPassLb[state='visible_hover']{
+   border-image: url(:/images/visible_hover.png);
+}

@@ -1,0 +1,26 @@
+/* ========== ApplyFriendPage 好友申请列表页 ========== */
+#ApplyFriendPage {
+    background-color: #ffffff;
+}
+
+#newFriendLb {
+    color: #1e293b;
+    font: bold 18px "Microsoft YaHei";
+    padding: 0 8px;
+}
+
+ApplyFriendList {
+    background-color: #f8fafc;
+    border: none;
+    outline: none;
+    padding: 0px;
+    margin: 0px;
+}
+
+ApplyFriendList::item {
+    background-color: transparent;
+    border: none;
+    outline: none;
+    padding: 0px;
+    margin: 0px;
+}

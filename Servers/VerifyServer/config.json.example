@@ -1,0 +1,10 @@
+{
+    "email": {
+        "user": "your_mailbox@qq.com",
+        "pass": "your_smtp_authorization_code"
+    },
+    "redis": {
+        "host": "127.0.0.1",
+        "port": "6379"
+    }
+}

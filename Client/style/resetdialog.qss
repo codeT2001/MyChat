@@ -1,0 +1,8 @@
+/* ========== ResetDialog 重置密码对话框 ========== */
+QDialog#ResetDialog {
+   background-color:rgb(255,255,255)
+}
+
+QLabel#resetErrTip {
+   background-color:rgb(255,255,255)
+}

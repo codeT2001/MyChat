@@ -1,0 +1,6 @@
+/* ========== ContactUserItem 联系人条目 ========== */
+#ContactUserItem #iconLb {
+    border-radius: 8px;
+    background-color: #f1f5f9;
+    border: 2px solid #e2e8f0;
+}

@@ -1,0 +1,114 @@
+/* ========== ChatPage 聊天页 ========== */
+
+/* ========== 顶部头部区域 ========== */
+#headerWidget {
+    background-color: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+#headerLabel {
+    color: #1e293b;
+    font: bold 18px "Microsoft YaHei";
+}
+
+/* ========== 中间聊天列表区域 ========== */
+#chatListWidget {
+    background-color: #f0f0f0;
+    border : none;
+}
+
+#chatArea {
+    border : none;
+}
+
+#chatBg {
+    background-color: #f0f0f0;
+}
+
+/* ========== 工具栏 ========== */
+#toolWidget {
+    background-color: #f8fafc;
+    border-radius: 6px;
+    border-bottom: 0.5px solid #ececec;
+}
+
+/* ========== 工具栏按钮 ========== */
+#toolWidget QPushButton {
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    font-size: 16px;
+    padding: 0 4px;
+}
+
+#toolWidget QPushButton:hover {
+    background-color: #e2e8f0;
+}
+
+/* ========== fileBtn 按钮 ========== */
+#fileBtn {
+    border-image: url(:/images/filedir.png);
+}
+
+#fileBtn:hover {
+    border-image: url(:/images/filedir_hover.png);
+}
+
+#fileBtn:pressed {
+    border-image: url(:/images/filedir_press.png);
+}
+
+/* ========== emoBtn 按钮 ========== */
+#emoBtn {
+    border-image: url(:/images/smile.png);
+}
+
+#emoBtn:hover {
+    border-image: url(:/images/smile_hover.png);
+}
+
+#emoBtn:pressed {
+    border-image: url(:/images/smile_press.png);
+}
+
+/* ========== 聊天编辑框 ========== */
+#chatEdit {
+    background-color: #f8fafc;
+    border: none;
+    border-radius: 6px;
+    padding: 8px;
+    color: #1e293b;
+    font: 14px "Microsoft YaHei";
+}
+
+#chatEdit:focus {
+    background-color: #f8fafc;
+    outline: none;
+}
+
+#chatEdit::placeholder {
+    color: #94a3b8;
+}
+
+/* ========== 发送按钮 ========== */
+QPushButton#sendMsgBtn {
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font: bold 14px "Microsoft YaHei";
+    padding: 0 20px;
+    min-height: 28px;
+}
+
+QPushButton#sendMsgBtn:hover {
+    background-color: #2563eb;
+}
+
+QPushButton#sendMsgBtn:pressed {
+    background-color: #1d4ed8;
+}
+
+QPushButton#sendMsgBtn:disabled {
+    background-color: #d1d5db;
+}
