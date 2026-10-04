@@ -45,7 +45,7 @@ graph TB
     MW -->|"认证界面"| Dialogs["LoginDialog / RegisterDialog / ResetDialog"]
     MW -->|"登录成功后"| CW["ChatWindow 聊天主界面"]
 
-    Dialogs --> Auth["AuthService<br/>登录业务编排"]
+    Dialogs --> Auth["AuthService（单例）<br/>登录/注册/重置认证编排"]
     Auth --> Http["HttpManager（单例）<br/>HTTP 请求/响应分发"]
     Auth --> Tcp["TcpManager（单例）<br/>TCP 长连接/封包拆包/心跳/重连"]
 
@@ -70,7 +70,7 @@ graph TB
 |---|---|---|
 | 入口 | `main.cpp` | 创建 `QApplication`、加载全局 QSS、显示主窗口；`#define NO_DEBUG 1` 决定启动 MainWindow（1）还是直接进 ChatWindow（0，调试用） |
 | 窗口调度 | `MainWindow` | 容器，持有各界面指针，用 `setCentralWidget` 做界面切换 |
-| 业务编排 | `AuthService` | 编排"HTTP 登录 → TCP 连接 → TCP 登录"完整链路，对外只暴露成功/失败信号 |
+| 业务编排 | `AuthService` | 编排"HTTP 登录 → TCP 连接 → TCP 登录"完整链路，并承接注册/验证码/重置密码流程，对外只暴露结果信号（单例） |
 | 业务服务 | `FriendService` | 搜索用户、加好友、同意/拒绝认证；处理对应服务端通知 |
 | 业务服务 | `ChatService` | 文本消息发送、接收通知，写入 UserManager 并通知 UI |
 | 通信层 | `HttpManager` | HTTP 请求与响应分发（单例） |
@@ -129,7 +129,7 @@ sequenceDiagram
     S->>S: 选 login_count 最小节点
     S-->>G: {host, port, token}
     G-->>H: {error:0, uid, host, port, token}
-    H-->>A: SigLoginModFinish
+    H-->>A: SigHttpFinish
     A->>T: SlotTcpConnect(host, port)
     T-->>A: SigConnectionSuccess
     A->>T: CHAT_LOGIN_REQ {uid, token}
@@ -168,15 +168,18 @@ sequenceDiagram
     V->>M: 发送验证码邮件
     V-->>G: 结果
     G-->>H: {error, email}
-    H-->>R: SigRegisterModFinish
+    H-->>A: SigHttpFinish
+    A-->>R: sigRegisterVerifyCodeResult
 
-    R->>H: POST /registerUser {name,email,passwd,verifyCode}
+    R->>A: Register(name,email,passwd,verifyCode)
+    A->>H: POST /registerUser {name,email,passwd,verifyCode}
     H->>G: 注册请求
     G->>G: 校验 Redis 验证码
     G->>DB: 注册事务（user_id 取号 + 插 user）
     DB-->>G: 新 uid / 失败
     G-->>H: {error, uid?, email?}
-    H-->>R: SigRegisterModFinish
+    H-->>A: SigHttpFinish
+    A-->>R: sigRegisterResult
 ```
 
 > 验证码倒计时按钮为 `TimerButton`；`/getVerifyCode` 的 `error=3` 表示"用户已存在"、`error=4` 视 VerifyServer 实现而定，以 `Servers/VerifyServer/README.md` 的错误码表为准。
@@ -205,7 +208,8 @@ sequenceDiagram
         DB-->>G: 结果
         G-->>H: error=0 或 6
     end
-    H-->>D: SigResetModFinish
+    H-->>A: SigHttpFinish
+    A-->>D: sigResetResult
 ```
 
 ### 4.4 搜索用户
@@ -434,16 +438,16 @@ graph BT
 |---|---|
 | `main.cpp` | 程序入口，加载全局 QSS |
 | `mainwindow.*` | 窗口调度与界面切换 |
-| `authservice.*` | 登录两段式编排 |
+| `authservice.*` | 认证服务单例：登录两段式编排 + 注册/重置密码流程 |
 | `friendservice.*` | 搜索 / 加好友 / 认证及通知处理 |
 | `chatservice.*` | 文本消息收发与通知处理 |
-| `httpmanager.*` | HTTP 单例，按 Modules 二次分发响应 |
+| `httpmanager.*` | HTTP 传输单例，按 RequestId 抛出 SigHttpFinish，不感知业务 |
 | `tcpmanager.*` | TCP 单例，封包/拆包、心跳、重连 |
 | `usermanager.*` | 用户/申请/好友/消息数据单例 |
 | `jsoncodec.*` | JSON 解析与序列化（JsonParser/JsonSerializer） |
 | `userdata.*` | 数据模型实现 |
 | `utils.*` | 表单校验、URL 拼接、QSS 加载 |
-| `constants.h` | ErrorCodes / RequestId / Modules / HttpPaths / ServerInfo / MsgInfo |
+| `constants.h` | ErrorCodes / RequestId / HttpPaths / ServerInfo / MsgInfo |
 | `noncopyable.h` | DISALLOW_COPY_MOVE 宏 |
 | `log.h` | 客户端日志宏（映射 qDebug 等） |
 

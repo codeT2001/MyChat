@@ -8,33 +8,18 @@
 #include "log.h"
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QUrl>
 
-AuthService::AuthService(QObject *parent) : QObject(parent), uid_(0)
+AuthService::AuthService()
 {
-    InitHandles();
-
-    connect(&HttpManager::GetInstance(), &HttpManager::SigLoginModFinish, this, &AuthService::SlotHttpLoginFinish);
+    connect(&HttpManager::GetInstance(), &HttpManager::SigHttpFinish, this, &AuthService::OnHttpFinish);
     connect(&TcpManager::GetInstance(), &TcpManager::SigConnectionSuccess, this, &AuthService::SlotTcpConnectFinish);
     connect(&TcpManager::GetInstance(), &TcpManager::SigMessageReceived, this, &AuthService::OnTcpMessageReceived);
 }
 
-void AuthService::InitHandles()
+void AuthService::PostHttp(const QString &path, const QJsonObject &json, RequestId id)
 {
-    handles_.insert(RequestId::USER_LOGIN, [this](const QJsonObject &jsonObj) {
-        int error = jsonObj["error"].toInt();
-        if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-            emit sigLoginError(tr("参数错误"));
-            return;
-        }
-        ServerInfo info = JsonParser::ParseLoginHttpRsp(jsonObj);
-
-        uid_ = info.uid;
-        token_ = info.token;
-
-        LOG_INFO() << "AuthService: HTTP login ok, connecting to" << info.host << info.port;
-        // 直接调用 SlotTcpConnect 发起 TCP 连接
-        TcpManager::GetInstance().SlotTcpConnect(info);
-    });
+    HttpManager::GetInstance().PostHttpReq(QUrl(Utils::GetServerUrl(path)), json, id);
 }
 
 void AuthService::Login(const QString &user, const QString &pwd)
@@ -43,27 +28,129 @@ void AuthService::Login(const QString &user, const QString &pwd)
     QJsonObject jsonObj;
     jsonObj["name"] = user;
     jsonObj["passwd"] = pwd;
-    HttpManager::GetInstance().PostHttpReq(QUrl(Utils::GetServerUrl(HttpPaths::USER_LOGIN)), jsonObj,
-                                           RequestId::USER_LOGIN, Modules::LOGIN);
+    PostHttp(HttpPaths::USER_LOGIN, jsonObj, RequestId::USER_LOGIN);
 }
 
-void AuthService::SlotHttpLoginFinish(RequestId id, QString res, ErrorCodes err)
+void AuthService::GetRegisterVerifyCode(const QString &email)
+{
+    verifyFlow_ = VerifyFlow::Register;
+    QJsonObject jsonObj;
+    jsonObj["email"] = email;
+    PostHttp(HttpPaths::GET_VERIFY_CODE, jsonObj, RequestId::GET_VERIFY_CODE);
+}
+
+void AuthService::Register(const QString &name, const QString &email, const QString &pwd, const QString &verifyCode)
+{
+    QJsonObject jsonObj;
+    jsonObj["name"] = name;
+    jsonObj["email"] = email;
+    jsonObj["passwd"] = pwd;
+    jsonObj["verifyCode"] = verifyCode;
+    PostHttp(HttpPaths::REGISTER_USER, jsonObj, RequestId::REG_USER);
+}
+
+void AuthService::GetResetVerifyCode(const QString &email)
+{
+    verifyFlow_ = VerifyFlow::Reset;
+    QJsonObject jsonObj;
+    jsonObj["email"] = email;
+    PostHttp(HttpPaths::GET_VERIFY_CODE, jsonObj, RequestId::GET_VERIFY_CODE);
+}
+
+void AuthService::ResetPassword(const QString &name, const QString &email, const QString &pwd, const QString &verifyCode)
+{
+    QJsonObject jsonObj;
+    jsonObj["name"] = name;
+    jsonObj["email"] = email;
+    jsonObj["passwd"] = pwd;
+    jsonObj["verifyCode"] = verifyCode;
+    PostHttp(HttpPaths::RESET_PASSWORD, jsonObj, RequestId::RESET_PASSWORD);
+}
+
+void AuthService::OnHttpFinish(RequestId id, const QString &res, ErrorCodes err)
 {
     if (err != ErrorCodes::SUCCESS) {
-        emit sigLoginError(tr("网络请求错误"));
+        EmitHttpError(id, tr("网络请求错误"));
         return;
     }
 
     QJsonDocument jsonDoc = QJsonDocument::fromJson(res.toUtf8());
     if (jsonDoc.isNull() || !jsonDoc.isObject()) {
-        emit sigLoginError(tr("json解析错误"));
+        EmitHttpError(id, tr("json解析错误"));
         return;
     }
 
-    auto iter = handles_.find(id);
-    if (iter != handles_.end()) {
-        iter.value()(jsonDoc.object());
+    QJsonObject obj = jsonDoc.object();
+    if (id == RequestId::USER_LOGIN) {
+        // 登录回包结构不同（含 host/port/token），单独走完整解析
+        HandleLoginHttpRsp(obj);
+        return;
     }
+
+    bool ok = obj["error"].toInt() == static_cast<int>(ErrorCodes::SUCCESS);
+    QString msg = ok ? QString() : tr("参数错误");
+
+    switch (id) {
+        case RequestId::GET_VERIFY_CODE: {
+            if (verifyFlow_ == VerifyFlow::Register) {
+                emit sigRegisterVerifyCodeResult(ok, msg);
+            } else if (verifyFlow_ == VerifyFlow::Reset) {
+                emit sigResetVerifyCodeResult(ok, msg);
+            }
+            verifyFlow_ = VerifyFlow::None;
+            break;
+        }
+        case RequestId::REG_USER:
+            emit sigRegisterResult(ok, msg);
+            break;
+        case RequestId::RESET_PASSWORD:
+            emit sigResetResult(ok, msg);
+            break;
+        default:
+            break;
+    }
+}
+
+void AuthService::EmitHttpError(RequestId id, const QString &msg)
+{
+    switch (id) {
+        case RequestId::USER_LOGIN:
+            emit sigLoginError(msg);
+            break;
+        case RequestId::GET_VERIFY_CODE:
+            if (verifyFlow_ == VerifyFlow::Register) {
+                emit sigRegisterVerifyCodeResult(false, msg);
+            } else if (verifyFlow_ == VerifyFlow::Reset) {
+                emit sigResetVerifyCodeResult(false, msg);
+            }
+            verifyFlow_ = VerifyFlow::None;
+            break;
+        case RequestId::REG_USER:
+            emit sigRegisterResult(false, msg);
+            break;
+        case RequestId::RESET_PASSWORD:
+            emit sigResetResult(false, msg);
+            break;
+        default:
+            break;
+    }
+}
+
+void AuthService::HandleLoginHttpRsp(const QJsonObject &obj)
+{
+    int error = obj["error"].toInt();
+    if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
+        emit sigLoginError(tr("参数错误"));
+        return;
+    }
+    ServerInfo info = JsonParser::ParseLoginHttpRsp(obj);
+
+    uid_ = info.uid;
+    token_ = info.token;
+
+    LOG_INFO() << "AuthService: HTTP login ok, connecting to" << info.host << info.port;
+    // 发起 TCP 连接
+    TcpManager::GetInstance().SlotTcpConnect(info);
 }
 
 void AuthService::SlotTcpConnectFinish(bool success)

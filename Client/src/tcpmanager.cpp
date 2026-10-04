@@ -46,7 +46,7 @@ TcpManager::TcpManager()
         forever
         {
             QDataStream stream(&buffer_, QIODevice::ReadOnly);
-            stream.setVersion(QDataStream::Qt_6_9);
+            stream.setVersion(QDataStream::Qt_6_0);
             if (!recvPedding_) {
                 if (buffer_.size() < static_cast<int>(MSG_HEAD_LENGTH)) {
                     return;

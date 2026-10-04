@@ -8,15 +8,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 {
     ui->setupUi(this);
 
-    // 先创建 AuthService，再创建依赖它的 LoginDialog
-    authService_ = new AuthService(this);
-
-    loginDialog_ = new LoginDialog(authService_, this);
+    loginDialog_ = new LoginDialog(this);
     connect(loginDialog_, &LoginDialog::SwitchRegister, this, &MainWindow::SwitchRegisterDialog);
     connect(loginDialog_, &LoginDialog::SwitchReset, this, &MainWindow::SwitchResetDialog);
 
-    // MainWindow 通过 AuthService 监听登录成功（不再直接依赖 TcpManager）
-    connect(authService_, &AuthService::sigLoginSuccess, this, &MainWindow::SlotLoginSuccess);
+    // MainWindow 通过 AuthService 监听登录成功（不再直接依赖 HttpManager/TcpManager）
+    connect(&AuthService::GetInstance(), &AuthService::sigLoginSuccess, this, &MainWindow::SlotLoginSuccess);
 
     setCentralWidget(loginDialog_);
 }
@@ -52,7 +49,7 @@ void MainWindow::SwitchLoginDialog()
         resetDialog_ = nullptr;
     }
     if (!loginDialog_) {
-        loginDialog_ = new LoginDialog(authService_, this);
+        loginDialog_ = new LoginDialog(this);
         connect(loginDialog_, &LoginDialog::SwitchRegister, this, &MainWindow::SwitchRegisterDialog);
         connect(loginDialog_, &LoginDialog::SwitchReset, this, &MainWindow::SwitchResetDialog);
     }

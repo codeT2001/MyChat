@@ -1,4 +1,4 @@
-#include "ChatUserList.h"
+#include "chatuserlist.h"
 #include "log.h"
 #include "userwidget.h"
 #include "usermanager.h"

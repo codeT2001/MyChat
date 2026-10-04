@@ -3,8 +3,6 @@
 
 #include <QDialog>
 
-class AuthService;
-
 namespace Ui {
 class LoginDialog;
 }
@@ -13,7 +11,7 @@ class LoginDialog : public QDialog {
     Q_OBJECT
 
 public:
-    explicit LoginDialog(AuthService *authService, QWidget *parent = nullptr);
+    explicit LoginDialog(QWidget *parent = nullptr);
     ~LoginDialog();
 
 public slots:
@@ -34,7 +32,6 @@ private:
     bool CheckPasswordValid();
 
     Ui::LoginDialog *ui;
-    AuthService *authService_;
 };
 
 #endif // LOGINDIALOG_H

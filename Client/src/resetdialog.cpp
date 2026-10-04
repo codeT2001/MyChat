@@ -1,7 +1,7 @@
 #include "resetdialog.h"
 #include "ui_resetdialog.h"
+#include "authservice.h"
 #include "utils.h"
-#include "httpmanager.h"
 #include "log.h"
 
 ResetDialog::ResetDialog(QWidget *parent) : QDialog(parent), ui(new Ui::ResetDialog)
@@ -12,7 +12,6 @@ ResetDialog::ResetDialog(QWidget *parent) : QDialog(parent), ui(new Ui::ResetDia
     SetupConnections();
     SetupValidation();
     Utils::ClearTips();
-    InitHttpHandles();
 }
 
 ResetDialog::~ResetDialog()
@@ -27,10 +26,7 @@ void ResetDialog::OnGetCodeClicked()
     if (!Utils::CheckEmailValid(email, ui->resetErrTip)) {
         return;
     }
-    QJsonObject jsonObj;
-    jsonObj["email"] = email;
-    HttpManager::GetInstance().PostHttpReq(QUrl(Utils::GetServerUrl(HttpPaths::GET_VERIFY_CODE)), jsonObj,
-                                           RequestId::GET_VERIFY_CODE, Modules::RESET);
+    AuthService::GetInstance().GetResetVerifyCode(email);
 }
 
 void ResetDialog::OnSureBtnClicked()
@@ -38,60 +34,28 @@ void ResetDialog::OnSureBtnClicked()
     if (!CheckUserValid() || !CheckEmailValid() || !CheckPasswordValid() || !CheckVerifyCodeValid()) {
         return;
     }
-    // 发送http重置用户请求
-    QJsonObject json_obj;
-    json_obj["name"] = ui->name->text();
-    json_obj["email"] = ui->email->text();
-    json_obj["passwd"] = ui->newPassword->text();
-    json_obj["verifyCode"] = ui->verifyCode->text();
     ui->sureBtn->setEnabled(false);
-    HttpManager::GetInstance().PostHttpReq(QUrl(Utils::GetServerUrl(HttpPaths::RESET_PASSWORD)), json_obj,
-                                           RequestId::RESET_PASSWORD, Modules::RESET);
+    AuthService::GetInstance().ResetPassword(ui->name->text(), ui->email->text(), ui->newPassword->text(),
+                                             ui->verifyCode->text());
 }
 
-void ResetDialog::SlotResetModFinish(RequestId id, QString res, ErrorCodes err)
+void ResetDialog::OnVerifyCodeResult(bool ok, const QString &msg)
+{
+    if (ok) {
+        Utils::ShowTip(ui->resetErrTip, tr("验证码已发送到邮箱，注意查收"));
+    } else {
+        Utils::ShowTip(ui->resetErrTip, msg, true);
+    }
+}
+
+void ResetDialog::OnResetResult(bool ok, const QString &msg)
 {
     ui->sureBtn->setEnabled(true);
-    if (err != ErrorCodes::SUCCESS) {
-        Utils::ShowTip(ui->resetErrTip, tr("网络请求错误"), true);
+    if (!ok) {
+        Utils::ShowTip(ui->resetErrTip, msg, true);
         return;
     }
-
-    // 解析 JSON 字符串,res需转化为QByteArray
-    QJsonDocument jsonDoc = QJsonDocument::fromJson(res.toUtf8());
-    // json解析错误
-    if (jsonDoc.isNull() || !jsonDoc.isObject()) {
-        Utils::ShowTip(ui->resetErrTip, tr("json解析错误"), true);
-        return;
-    }
-    if (handles_.find(id) != handles_.end()) {
-        handles_[id](jsonDoc.object());
-    }
-}
-
-void ResetDialog::InitHttpHandles()
-{
-    handles_.insert(RequestId::GET_VERIFY_CODE, [this](const QJsonObject &jsonObj) {
-        int32_t error = jsonObj["error"].toInt();
-        if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-            Utils::ShowTip(ui->resetErrTip, tr("参数错误"), true);
-            return;
-        }
-        auto email = jsonObj["email"].toString();
-        Utils::ShowTip(ui->resetErrTip, tr("验证码已发送到邮箱，注意查收"));
-        LOG_DEBUG() << "email is " << email;
-    });
-    handles_.insert(RequestId::RESET_PASSWORD, [this](const QJsonObject &jsonObj) {
-        int32_t error = jsonObj["error"].toInt();
-        if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-            Utils::ShowTip(ui->resetErrTip, tr("参数错误"), true);
-            return;
-        }
-        auto email = jsonObj["email"].toString();
-        Utils::ShowTip(ui->resetErrTip, tr("重置成功,点击返回登录"));
-        LOG_DEBUG() << "email is " << email;
-        LOG_DEBUG() << "user uid is " << jsonObj["uid"].toInt();
-    });
+    Utils::ShowTip(ui->resetErrTip, tr("重置成功,点击返回登录"));
 }
 
 bool ResetDialog::CheckUserValid()
@@ -128,7 +92,9 @@ void ResetDialog::SetupConnections()
     connect(ui->sureBtn, &QPushButton::clicked, this, &ResetDialog::OnSureBtnClicked);
     connect(ui->backBtn, &QPushButton::clicked, this, &ResetDialog::SwitchLogin);
     connect(ui->getCode, &QPushButton::clicked, this, &ResetDialog::OnGetCodeClicked);
-    connect(&HttpManager::GetInstance(), &HttpManager::SigResetModFinish, this, &ResetDialog::SlotResetModFinish);
+    auto &authService = AuthService::GetInstance();
+    connect(&authService, &AuthService::sigResetVerifyCodeResult, this, &ResetDialog::OnVerifyCodeResult);
+    connect(&authService, &AuthService::sigResetResult, this, &ResetDialog::OnResetResult);
 }
 
 void ResetDialog::SetupValidation()

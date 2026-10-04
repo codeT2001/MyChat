@@ -1,7 +1,6 @@
 #ifndef REGISTERDIALOG_H
 #define REGISTERDIALOG_H
 
-#include "constants.h"
 #include <QDialog>
 #include <QTimer>
 namespace Ui {
@@ -20,7 +19,9 @@ public Q_SLOTS:
     void OnCancelClicked();
     void OnBackToLoginClicked();
     void OnTimerTimeout();
-    void SlotRegisterModFinish(RequestId id, QString res, ErrorCodes err);
+    // AuthService 结果回调（UI 只展示结果，不感知网络细节）
+    void OnVerifyCodeResult(bool ok, const QString &msg);
+    void OnRegisterResult(bool ok, const QString &msg);
 Q_SIGNALS:
     void SwitchLogin();
 
@@ -32,7 +33,6 @@ private:
     void SetupValidation();
     void SetupTimer();
     // Component methods
-    void InitHttpHandles();
     bool CheckUserValid();
     bool CheckPasswordValid();
     bool CheckConfirmValid();
@@ -40,7 +40,6 @@ private:
     bool CheckVerifyCodeValid();
     void ChangeTipPage();
     Ui::RegisterDialog *ui;
-    QMap<RequestId, std::function<void(const QJsonObject &)>> handles_;
     QTimer *timer_;
     int32_t countDown_;
 };

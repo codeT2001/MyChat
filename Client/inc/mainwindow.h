@@ -6,7 +6,6 @@
 #include "resetdialog.h"
 #include "chatwindow.h"
 
-class AuthService;
 class LoginDialog;
 
 QT_BEGIN_NAMESPACE
@@ -30,7 +29,6 @@ public Q_SLOTS:
 
 private:
     Ui::MainWindow *ui;
-    AuthService *authService_ = nullptr;
     LoginDialog *loginDialog_ = nullptr;
     RegisterDialog *registerDialog_ = nullptr;
     ResetDialog *resetDialog_ = nullptr;

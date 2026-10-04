@@ -41,12 +41,6 @@ enum class RequestId {
     CHAT_HEARTBEAT = 99999, // 心跳包
 };
 
-enum class Modules {
-    REGISTER = 0,
-    RESET,
-    LOGIN,
-};
-
 // HTTP API path constants
 namespace HttpPaths {
 inline constexpr char GET_VERIFY_CODE[] = "/getVerifyCode";

@@ -1,7 +1,6 @@
 #ifndef RESETDIALOG_H
 #define RESETDIALOG_H
 
-#include "constants.h"
 #include <QDialog>
 
 namespace Ui {
@@ -17,7 +16,9 @@ public:
 public Q_SLOTS:
     void OnGetCodeClicked();
     void OnSureBtnClicked();
-    void SlotResetModFinish(RequestId id, QString res, ErrorCodes err);
+    // AuthService 结果回调（UI 只展示结果，不感知网络细节）
+    void OnVerifyCodeResult(bool ok, const QString &msg);
+    void OnResetResult(bool ok, const QString &msg);
 Q_SIGNALS:
     void SwitchLogin();
 
@@ -27,13 +28,11 @@ private:
     void SetupConnections();
     void SetupValidation();
     // Component methods
-    void InitHttpHandles();
     bool CheckUserValid();
     bool CheckPasswordValid();
     bool CheckEmailValid();
     bool CheckVerifyCodeValid();
     Ui::ResetDialog *ui;
-    QMap<RequestId, std::function<void(const QJsonObject &)>> handles_;
 };
 
 #endif // RESETDIALOG_H

@@ -4,8 +4,8 @@
 #include "utils.h"
 #include "log.h"
 
-LoginDialog::LoginDialog(AuthService *authService, QWidget *parent)
-    : QDialog(parent), ui(new Ui::LoginDialog), authService_(authService)
+LoginDialog::LoginDialog(QWidget *parent)
+    : QDialog(parent), ui(new Ui::LoginDialog)
 {
     ui->setupUi(this);
     Utils::LoadQss(this, ":/style/logindialog.qss");
@@ -44,8 +44,9 @@ void LoginDialog::SetupConnections()
     connect(ui->forgetLabel, &QClickLabel::clicked, this, &LoginDialog::SwitchReset);
     connect(ui->loginBtn, &QPushButton::clicked, this, &LoginDialog::OnLoginBtnClicked);
     // 监听 AuthService 的结果信号（不再直接依赖 HttpManager/TcpManager）
-    connect(authService_, &AuthService::sigLoginFailed, this, &LoginDialog::OnLoginFailed);
-    connect(authService_, &AuthService::sigLoginError, this, &LoginDialog::OnLoginError);
+    auto &authService = AuthService::GetInstance();
+    connect(&authService, &AuthService::sigLoginFailed, this, &LoginDialog::OnLoginFailed);
+    connect(&authService, &AuthService::sigLoginError, this, &LoginDialog::OnLoginError);
 }
 
 void LoginDialog::SetupPasswordToggle()
@@ -71,7 +72,7 @@ void LoginDialog::OnLoginBtnClicked()
         return;
     }
     ui->loginBtn->setEnabled(false);
-    authService_->Login(ui->userName->text(), ui->password->text());
+    AuthService::GetInstance().Login(ui->userName->text(), ui->password->text());
 }
 
 void LoginDialog::OnLoginFailed()
