@@ -1,7 +1,7 @@
 ﻿#include "mainwindow.h"
 #include "logindialog.h"
 #include "authservice.h"
-#include "./ui_mainwindow.h"
+#include "ui_mainwindow.h"
 #include <QMessageBox>
 #include <qdebug.h>
 

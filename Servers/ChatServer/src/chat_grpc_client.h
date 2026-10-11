@@ -5,8 +5,6 @@
 #include <unordered_map>
 #include <memory>
 #include "jsoncpp/json/json.h"
-#include "jsoncpp/json/reader.h"
-#include "jsoncpp/json/value.h"
 #include "message.grpc.pb.h"
 #include "chat/noncopyable.h"
 #include "chat/rpc_stub_pool.h"

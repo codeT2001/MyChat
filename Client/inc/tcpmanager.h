@@ -41,7 +41,7 @@ signals:
 
 private:
     DISALLOW_COPY_MOVE(TcpManager)
-    void HandleMsg(RequestId id, int32_t len, const QByteArray &data);
+    void HandleMsg(RequestId id, const QByteArray &data);
     // 连接生命周期管理
     void StartHeartbeat();
     void StopHeartbeat();

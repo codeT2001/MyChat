@@ -56,6 +56,9 @@ constexpr char USER_SERVER_PREFIX[] = "userver_";
 // Redis key for login count
 constexpr char LOGIN_COUNT[] = "login_count";
 
+// 内置头像数量：与客户端 kAvatarCount（Client/src/utils.cpp）、images/head_1..N.jpg 保持一致
+constexpr int32_t AVATAR_COUNT = 5;
+
 // friend_apply.status：待处理 / 已同意 / 已拒绝
 constexpr int32_t APPLY_STATUS_PENDING = 0;
 constexpr int32_t APPLY_STATUS_ACCEPTED = 1;

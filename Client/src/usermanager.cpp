@@ -75,12 +75,12 @@ QString UserManager::GetToken() const
     return token_;
 }
 
-const std::unordered_map<int32_t, std::shared_ptr<ApplyInfo>> &UserManager::GetApplyList()
+const std::unordered_map<int32_t, std::shared_ptr<ApplyInfo>> &UserManager::GetApplyList() const
 {
     return applyList_;
 }
 
-bool UserManager::AlreadyApply(int32_t uid)
+bool UserManager::AlreadyApply(int32_t uid) const
 {
     return applyList_.find(uid) != applyList_.end();
 }
@@ -124,7 +124,7 @@ bool UserManager::IsFriendListExhausted(int loadedCount) const
     return loadedCount >= static_cast<int>(friendMap_.size());
 }
 
-bool UserManager::CheckFriendById(int uid)
+bool UserManager::CheckFriendById(int uid) const
 {
     return friendMap_.find(uid) != friendMap_.end();
 }
@@ -143,7 +143,7 @@ void UserManager::AddFriend(std::shared_ptr<FriendInfo> friend_info)
     friendMap_[friend_info->uid_] = friend_info;
 }
 
-std::shared_ptr<FriendInfo> UserManager::GetFriendById(int32_t uid)
+std::shared_ptr<FriendInfo> UserManager::GetFriendById(int32_t uid) const
 {
     auto it = friendMap_.find(uid);
     if (it == friendMap_.end()) {

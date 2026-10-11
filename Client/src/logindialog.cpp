@@ -78,7 +78,7 @@ void LoginDialog::OnLoginBtnClicked()
 void LoginDialog::OnLoginFailed()
 {
     ui->loginBtn->setEnabled(true);
-    Utils::ShowTip(ui->loginErrTip, tr("登陆失败"), true);
+    Utils::ShowTip(ui->loginErrTip, tr("登录失败"), true);
 }
 
 void LoginDialog::OnLoginError(const QString &msg)

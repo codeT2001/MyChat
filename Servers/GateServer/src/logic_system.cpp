@@ -4,8 +4,6 @@
 #include "chat/log.h"
 #include "http_connection.h"
 #include "jsoncpp/json/json.h"
-#include "jsoncpp/json/reader.h"
-#include "jsoncpp/json/value.h"
 #include "chat/mysql_manager.h"
 #include "chat/redis_manager.h"
 #include "chat/status_grpc_client.h"
@@ -13,7 +11,8 @@
 #include <random>
 namespace P1 {
 namespace {
-const std::string CODE_PREFIX = "code_";
+// 与 VerifyServer/constants.js 的 code_prefix 保持一致
+constexpr char CODE_PREFIX[] = "code_";
 
 // 解析 POST 请求体并校验必填 string 字段。
 // 失败时向 rsp 写入 ERROR_JSON 并返回 false（四个 POST 处理器共用）
@@ -84,9 +83,9 @@ void LogicSystem::RegisterPost(std::string url, HttpHandler handler)
 void LogicSystem::HandleGetTest(HttpConnPtr conn)
 {
     auto& response = conn->GetResponse();
-    beast::ostream(response.body()) << "recive get_test req" << std::endl;
+    beast::ostream(response.body()) << "receive get_test req" << std::endl;
     size_t i = 0;
-    for (const auto [k, v] : conn->QueryGetParams()) {
+    for (const auto &[k, v] : conn->QueryGetParams()) {
         ++i;
         beast::ostream(response.body()) << "param " << i << " key is " << k;
         beast::ostream(response.body()) << " param " << i << " value is " << v << std::endl;
@@ -146,8 +145,8 @@ void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
     std::string pwd = src["passwd"].asString();
     // 注册时随机分配头像：icon 存 "head_N"，客户端解析到本地资源 :/images/head_N.jpg
     static std::mt19937 rng(std::random_device{}());
-    std::string icon = "head_" + std::to_string(std::uniform_int_distribution<int>(1, 5)(rng));
-    int uid = MysqlMganager::GetInstance().RegisterUser(name, email, pwd, icon);
+    std::string icon = "head_" + std::to_string(std::uniform_int_distribution<int>(1, AVATAR_COUNT)(rng));
+    int uid = MysqlManager::GetInstance().RegisterUser(name, email, pwd, icon);
     if (uid == 0 || uid == -1) {
         LOG_WARN("[GateServer] RegisterUser failed, user or email already exist, name:%s", name.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::USER_EXIST);
@@ -191,13 +190,13 @@ void LogicSystem::HandleResetPassword(HttpConnPtr conn)
 
     std::string name = src["name"].asString();
     std::string pwd = src["passwd"].asString();
-    if (!MysqlMganager::GetInstance().CheckEmail(name, email)) {
+    if (!MysqlManager::GetInstance().CheckEmail(name, email)) {
         LOG_WARN("[GateServer] ResetPassword failed, email not match, name:%s", name.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::EMAIL_NOT_MATCH);
         return;
     }
 
-    if (!MysqlMganager::GetInstance().UpdatePassword(email, pwd)) {
+    if (!MysqlManager::GetInstance().UpdatePassword(email, pwd)) {
         LOG_WARN("[GateServer] ResetPassword failed, update password failed, email:%s", email.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::UPDATE_PASSWORD_FAILED);
         return;
@@ -229,7 +228,7 @@ void LogicSystem::HandleUserLogin(HttpConnPtr conn)
     std::string pwd = src["passwd"].asString();
     root["name"] = name;
     UserInfo userInfo;
-    if (!MysqlMganager::GetInstance().CheckPassword(name, pwd, userInfo)) {
+    if (!MysqlManager::GetInstance().CheckPassword(name, pwd, userInfo)) {
         LOG_WARN("[GateServer] UserLogin failed, password not match, name:%s", name.c_str());
         root["error"] = static_cast<int32_t>(ErrorCodes::PASSWORD_NOT_MATCH);
         return;

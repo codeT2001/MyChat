@@ -57,7 +57,7 @@ void ApplyFriendPage::paintEvent(QPaintEvent *event)
 
 void ApplyFriendPage::LoadApplyList()
 {
-    auto apply_list = UserManager::GetInstance().GetApplyList();
+    const auto &apply_list = UserManager::GetInstance().GetApplyList();
     for (auto &[k, apply] : apply_list) {
         auto *apply_item = new ApplyFriendItem();
         apply->SetIcon(Utils::ResolveIcon(apply->icon_));

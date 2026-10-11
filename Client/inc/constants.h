@@ -26,8 +26,8 @@ enum class RequestId {
     USER_LOGIN,             // 用户登录
 
     // forChatServer
-    CHAT_LOGIN_REQ = 10001,         // 登陆聊天服务器
-    CHAT_LOGIN_RSP = 10002,         // 登陆聊天服务器回包
+    CHAT_LOGIN_REQ = 10001,         // 登录聊天服务器
+    CHAT_LOGIN_RSP = 10002,         // 登录聊天服务器回包
     SEARCH_USER_REQ = 10003,        // 搜索用户请求
     SEARCH_USER_RSP = 10004,        // 搜索用户响应
     ADD_FRIEND_REQ = 10005,         // 添加好友请求

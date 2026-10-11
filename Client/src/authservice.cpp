@@ -10,6 +10,36 @@
 #include <QJsonObject>
 #include <QUrl>
 
+namespace {
+// 错误码 → 用户可见文案：HTTP/TCP 回包统一走这里，避免一律提示"参数错误"
+QString ErrorCodeToMessage(ErrorCodes err)
+{
+    switch (err) {
+        case ErrorCodes::SUCCESS:
+            return QString();
+        case ErrorCodes::ERROR_JSON:
+            return QObject::tr("请求参数有误");
+        case ErrorCodes::RPC_FAILED:
+            return QObject::tr("服务暂时不可用，请稍后重试");
+        case ErrorCodes::VERIFYCODE_NOT_FOUND_OR_EXPIRED:
+            return QObject::tr("验证码不存在或已过期");
+        case ErrorCodes::USER_EXIST:
+            return QObject::tr("用户名或邮箱已被注册");
+        case ErrorCodes::ERR_NETWORK:
+            return QObject::tr("网络异常，请检查网络连接");
+        case ErrorCodes::JSON_PARSE_ERROR:
+            return QObject::tr("服务器响应解析失败");
+        case ErrorCodes::VERIFY_CODE_EXISTS:
+            return QObject::tr("验证码已发送，请稍后再试");
+        case ErrorCodes::VERIFY_REDIS_ERROR:
+        case ErrorCodes::VERIFY_MAIL_FAILED:
+            return QObject::tr("验证码服务异常，请稍后重试");
+        default:
+            return QObject::tr("请求失败（错误码 %1）").arg(static_cast<int>(err));
+    }
+}
+} // namespace
+
 AuthService::AuthService()
 {
     connect(&HttpManager::GetInstance(), &HttpManager::SigHttpFinish, this, &AuthService::OnHttpFinish);
@@ -87,8 +117,9 @@ void AuthService::OnHttpFinish(RequestId id, const QString &res, ErrorCodes err)
         return;
     }
 
-    bool ok = obj["error"].toInt() == static_cast<int>(ErrorCodes::SUCCESS);
-    QString msg = ok ? QString() : tr("参数错误");
+    const ErrorCodes code = ExtractError(obj);
+    const bool ok = (code == ErrorCodes::SUCCESS);
+    const QString msg = ok ? QString() : ErrorCodeToMessage(code);
 
     switch (id) {
         case RequestId::GET_VERIFY_CODE: {
@@ -138,9 +169,9 @@ void AuthService::EmitHttpError(RequestId id, const QString &msg)
 
 void AuthService::HandleLoginHttpRsp(const QJsonObject &obj)
 {
-    int error = obj["error"].toInt();
-    if (error != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-        emit SigLoginError(tr("参数错误"));
+    const ErrorCodes code = ExtractError(obj);
+    if (code != ErrorCodes::SUCCESS) {
+        emit SigLoginError(ErrorCodeToMessage(code));
         return;
     }
     ServerInfo info = JsonParser::ParseLoginHttpRsp(obj);

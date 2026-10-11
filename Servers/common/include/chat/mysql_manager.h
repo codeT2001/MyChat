@@ -5,12 +5,12 @@
 namespace P1 {
 struct ApplyInfo;
 struct UserInfo;
-class MysqlMganager {
+class MysqlManager {
 public:
-    static MysqlMganager& GetInstance() { static MysqlMganager instance; return instance; }
-    DISALLOW_COPY_MOVE(MysqlMganager);
+    static MysqlManager& GetInstance() { static MysqlManager instance; return instance; }
+    DISALLOW_COPY_MOVE(MysqlManager);
 
-    ~MysqlMganager() = default;
+    ~MysqlManager() = default;
 
     int RegisterUser(const std::string& name, const std::string& email, const std::string& pwd, const std::string& icon);
     bool CheckEmail(const std::string& name, const std::string & email);
@@ -25,7 +25,7 @@ public:
 	bool GetFriendList(int self_id, std::vector<std::shared_ptr<UserInfo> >& list);
     // bool TestProcedure(const std::string &email, int& uid, const std::string & name);
 private:
-    MysqlMganager() = default;
+    MysqlManager() = default;
     MysqlDao dao_;
 };
 

@@ -1,14 +1,14 @@
 const grpc = require('@grpc/grpc-js')
 const messageProto = require('./proto')
-const constantsMdule = require('./constants')
+const constantsModule = require('./constants')
 const { v4: uuidv4 } = require('uuid')
-const emailMdoule = require('./email')
+const emailModule = require('./email')
 const configModule = require('./config');
 const redisModule = require('./redis')
 
 async function GracefulShutdown() {
     console.log('\n[EXIT] closing email pool...')
-    await emailMdoule.close()        // ③ 真正关闭连接池
+    await emailModule.close()        // ③ 真正关闭连接池
     console.log('[EXIT] pool closed, bye.')
     process.exit(0)
 }
@@ -20,17 +20,16 @@ process.on('SIGTERM', GracefulShutdown)  // kill $PID
 async function GetVerifyCode(call, callback) {
     console.log('email is ', call.request.email)
     try {
-        let queryRes = await redisModule.GetRedis(constantsMdule.code_prefix + call.request.email);
-        console.log('queryResult is ', queryRes)
+        const queryRes = await redisModule.GetRedis(constantsModule.code_prefix + call.request.email);
         let uniqueId = queryRes;
         if (queryRes === null) {
             uniqueId = uuidv4();
             if (uniqueId.length > 4) {
                 uniqueId = uniqueId.substring(0, 4);
             }
-            let bres = await redisModule.SetRedisExpire(constantsMdule.code_prefix + call.request.email, uniqueId, 600)
+            const bres = await redisModule.SetRedisExpire(constantsModule.code_prefix + call.request.email, uniqueId, 600)
             if (!bres) {
-                callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_REDIS_ERROR })
+                callback(null, { email: call.request.email, error: constantsModule.Errors.VERIFY_REDIS_ERROR })
                 return;
             }
             const expireAt = new Date(Date.now() + 10 * 60 * 1000)
@@ -43,30 +42,29 @@ async function GetVerifyCode(call, callback) {
 
             const text_str = `您的验证码是 ${uniqueId}，请在 ${timeStr} 前完成注册。`
 
-            let mailOptions = {
+            const mailOptions = {
                 from: configModule.email_user,
                 to: call.request.email,
                 subject: '验证码',
                 text: text_str
             }
 
-            let res = await emailMdoule.SendMail(mailOptions)
-            console.log('send res is ', res)
-            callback(null, { email: call.request.email, error: constantsMdule.Errors.SUCCESS })
+            const res = await emailModule.SendMail(mailOptions)
+            console.log('[SMTP] sent, id=', res.messageId)
+            callback(null, { email: call.request.email, error: constantsModule.Errors.SUCCESS })
         } else {
-            callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_CODE_EXISTS })
+            callback(null, { email: call.request.email, error: constantsModule.Errors.VERIFY_CODE_EXISTS })
         }
-        console.log('uniqueId is ', uniqueId)
     } catch (err) {
         console.error(
             `[SMTP] ${new Date().toISOString()} ${err.code} ${err.command} ${err.message}`
         );
-        callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_MAIL_FAILED })
+        callback(null, { email: call.request.email, error: constantsModule.Errors.VERIFY_MAIL_FAILED })
     }
 }
 
 function main() {
-    let server = new grpc.Server();
+    const server = new grpc.Server();
     server.addService(messageProto.VerifyService.service, { GetVerifyCode: GetVerifyCode })
     server.bindAsync('127.0.0.1:50051', grpc.ServerCredentials.createInsecure(), () => {
         console.log('grpc server started...')

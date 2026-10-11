@@ -10,9 +10,10 @@
 #include <cstring>
 
 namespace {
-// Server URLs
-constexpr char SERVER_HOST[] = "81.69.247.52";
-constexpr int SERVER_PORT = 9090;
+// GateServer 默认地址。可用环境变量 CHAT_SERVER_HOST / CHAT_SERVER_PORT 覆盖，
+// 本地调试无需改源码重编译（见 Client/AGENTS.md「安全与配置提示」）。
+constexpr char DEFAULT_SERVER_HOST[] = "81.69.247.52";
+constexpr int DEFAULT_SERVER_PORT = 9090;
 } // namespace
 QMap<TipType, QString> Utils::tipStack_;
 void Utils::ShowTip(QLabel *tip, const QString &msg, bool isError)
@@ -163,7 +164,13 @@ bool Utils::CheckVerifyCodeValid(const QString &str, QLabel *label, int32_t leng
 
 QString Utils::GetServerUrl(const QString &path)
 {
-    return QString("http://%1:%2%3").arg(SERVER_HOST).arg(SERVER_PORT).arg(path);
+    static const QString host = qEnvironmentVariable("CHAT_SERVER_HOST", DEFAULT_SERVER_HOST);
+    static const int port = []() {
+        bool ok = false;
+        const int v = qEnvironmentVariableIntValue("CHAT_SERVER_PORT", &ok);
+        return (ok && v > 0) ? v : DEFAULT_SERVER_PORT;
+    }();
+    return QString("http://%1:%2%3").arg(host).arg(port).arg(path);
 }
 
 void Utils::ClearTips()

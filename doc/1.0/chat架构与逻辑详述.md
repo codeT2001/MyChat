@@ -239,7 +239,7 @@ Qt6 工程，五层解耦（`main.cpp` 注释即设计意图："解耦网络处�
 
 **TCP（`tcpmanager.cpp`）**：
 - **纯传输层**：只拆帧不解析业务，把 `(msgId, body)` 通过 `SigMessageReceived` 广播给各 Service，由 Service 认领自己的 msgId（多播分发）。
-- **收包状态机**：`recvPedding_` 标志实现跨 `readyRead` 的**半包续读**；1MB 接收缓冲上限 + 单包 10MB 上限两道防线。
+- **收包状态机**：`recvPending_` 标志实现跨 `readyRead` 的**半包续读**；1MB 接收缓冲上限 + 单包 10MB 上限两道防线。
 - **帧编解码**：`QDataStream` 设 BigEndian，`out << msgId << len`，与后端对应。
 - **心跳**：连接成功即启动，每 30s 发空 body 的 `CHAT_HEARTBEAT(99999)`。
 - **断线重连**：指数退避 1s→2s→…→60s，最多 10 次。

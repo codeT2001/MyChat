@@ -14,45 +14,22 @@ redisCli.on('error', function (err) {
 async function GetRedis(key) {
     try {
         const ret = await redisCli.get(key)
-        if (ret === null) {
-            console.log(`result<${ret}>, this key cannot be find...`)
-        } else {
-            console.log(`result<${ret}>, get key success!...`)
-        }
         return ret;
     } catch (error) {
         console.log('getRedis error is ', error)
     }
 }
 
-async function QueryRedis(key) {
-    try {
-        const ret = await redisCli.exists(key)
-        if (ret === null) {
-            console.log(`result<${ret}>, this key is null`)
-        } else {
-            console.log(`result<${ret}>, with this value...`)
-        }
-        return ret;
-    } catch (error) {
-        console.log('queryRedis error is ', error)
-    }
-}
-
+// 写入验证码并设置过期时间；SET 与 EXPIRE 任一失败都返回 false
 async function SetRedisExpire(key, value, exptime) {
     try {
         await redisCli.set(key, value)
         await redisCli.expire(key, exptime)
         return true
-        return ret;
     } catch (error) {
         console.log('setRedisExpire error is ', error)
         return false
     }
 }
 
-function Quit() {
-    redisCli.quit()
-}
-
-module.exports = { GetRedis, QueryRedis, Quit, SetRedisExpire }
+module.exports = { GetRedis, SetRedisExpire }

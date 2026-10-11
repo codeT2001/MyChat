@@ -7,8 +7,6 @@
 #include "chat/constants.h"
 #include "chat/log.h"
 #include "jsoncpp/json/json.h"
-#include "jsoncpp/json/reader.h"
-#include "jsoncpp/json/value.h"
 #include "chat/mysql_manager.h"
 #include "chat/redis_manager.h"
 #include "chat/status_grpc_client.h"
@@ -176,13 +174,13 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     retValue["token"] = token;
     // 获取申请列表
     std::vector<std::shared_ptr<ApplyInfo>> applyList;
-    if (MysqlMganager::GetInstance().GetApplyList(uid, applyList, 0, 10)) {
+    if (MysqlManager::GetInstance().GetApplyList(uid, applyList, 0, 10)) {
         AppendApplyList(retValue, applyList);
     }
 
     // 获取好友列表
     std::vector<std::shared_ptr<UserInfo>> friendList;
-    MysqlMganager::GetInstance().GetFriendList(uid, friendList);
+    MysqlManager::GetInstance().GetFriendList(uid, friendList);
     AppendFriendList(retValue, friendList);
 
     auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
@@ -269,7 +267,7 @@ bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::s
         LOG_INFO("[LogicSystem] GetBaseUserInfo from redis, uid:%d, name:%s", uid, userInfo->name.c_str());
         return true;
     }
-    auto info = MysqlMganager::GetInstance().GetUserByUid(uid);
+    auto info = MysqlManager::GetInstance().GetUserByUid(uid);
     if (!info) {
         return false;
     }
@@ -318,7 +316,7 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
         return;
     }
     int32_t uid = std::stoi(uidStr);
-    auto info = MysqlMganager::GetInstance().GetUserByUid(uid);
+    auto info = MysqlManager::GetInstance().GetUserByUid(uid);
     if(!info) {
         rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         LOG_WARN("[LogicSystem] HandleSearchUser failed, uid:%s not found", uidStr.c_str());
@@ -355,7 +353,7 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
         session->SendMessage(rtValue.toStyledString(), static_cast<uint16_t>(MSG_IDS::ADD_FRIEND_RSP));
     });
 
-    MysqlMganager::GetInstance().AddFriendApply(from_uid, to_uid);
+    MysqlManager::GetInstance().AddFriendApply(from_uid, to_uid);
     auto to_server = GetPeerServer(to_uid);
     if (!to_server.has_value()) {
         LOG_INFO("[LogicSystem] HandleAddFriend, to_uid:%d offline", to_uid);
@@ -440,7 +438,7 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
     // 1) 同步申请状态：同意置 1，拒绝置 2
     const int32_t applyStatus =
         (action == FRIEND_ACTION_ACCEPT) ? APPLY_STATUS_ACCEPTED : APPLY_STATUS_REJECTED;
-    if (!MysqlMganager::GetInstance().AuthFriendApply(peer_uid, self_uid, applyStatus)) {
+    if (!MysqlManager::GetInstance().AuthFriendApply(peer_uid, self_uid, applyStatus)) {
         LOG_WARN("[LogicSystem] HandleAuthFriend update apply status failed, from:%d, to:%d, action:%d",
             peer_uid, self_uid, action);
         rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
@@ -449,7 +447,7 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
 
     // 2) 同意才建立好友关系；拒绝不建立
     if (action == FRIEND_ACTION_ACCEPT &&
-        !MysqlMganager::GetInstance().AddFriend(peer_uid, self_uid, remark_name)) {
+        !MysqlManager::GetInstance().AddFriend(peer_uid, self_uid, remark_name)) {
         LOG_WARN("[LogicSystem] HandleAuthFriend AddFriend failed, from:%d, to:%d", peer_uid, self_uid);
         rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return;

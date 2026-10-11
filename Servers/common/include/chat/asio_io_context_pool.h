@@ -9,6 +9,9 @@
 
 #include "chat/noncopyable.h"
 namespace P1 {
+// io_context（IO 线程）数量
+constexpr std::size_t DEFAULT_IO_THREADS = 2;
+
 class AsioIOContextPool {
 public:
     static AsioIOContextPool& GetInstance() { static AsioIOContextPool instance; return instance; }
@@ -24,7 +27,7 @@ public:
     void Stop();
 
 private:
-    AsioIOContextPool(std::size_t size = 2 /*std::thread::hardware_concurrency()*/);
+    AsioIOContextPool(std::size_t size = DEFAULT_IO_THREADS);
     std::vector<IOContextPtr> ioContext_;
     std::vector<WorkPtr> works_;
     std::vector<std::thread> threads_;

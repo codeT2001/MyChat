@@ -25,7 +25,7 @@ graph TB
         Pool["asio_io_context_pool<br/>I/O 线程池（单例）"]
         Redis["redis_manager<br/>Redis 连接池（sw::redis++）"]
         MyDao["mysql_dao<br/>DAO + SqlConnPool 连接池"]
-        MyMgr["mysql_manager<br/>MysqlMganager 单例门面"]
+    MyMgr["mysql_manager<br/>MysqlManager 单例门面"]
         StubPool["rpc_stub_pool<br/>gRPC stub 池模板"]
         StatusCli["status_grpc_client<br/>→ StatusServer"]
         VerifyCli["verify_grpc_client<br/>→ VerifyServer"]
@@ -57,7 +57,7 @@ graph TB
 | `include/chat/asio_io_context_pool.h` / `src/asio_io_context_pool.cpp` | Asio io_context 线程池单例 |
 | `include/chat/redis_manager.h` / `src/redis_manager.cpp` | Redis 连接池单例 |
 | `include/chat/mysql_dao.h` / `src/mysql_dao.cpp` | MySQL DAO 与内部连接池 |
-| `include/chat/mysql_manager.h` / `src/mysql_manager.cpp` | MySQL 管理器单例（类名拼写 `MysqlMganager`，历史遗留） |
+| `include/chat/mysql_manager.h` / `src/mysql_manager.cpp` | MySQL 管理器单例 `MysqlManager`（包装 `MysqlDao`） |
 | `include/chat/rpc_stub_pool.h` | gRPC stub 连接池类模板（header-only） |
 | `include/chat/status_grpc_client.h` / `src/status_grpc_client.cpp` | StatusServer gRPC 客户端单例 |
 | `include/chat/verify_grpc_client.h` / `src/verify_grpc_client.cpp` | VerifyServer gRPC 客户端单例 |
@@ -142,7 +142,7 @@ C++ 服务间及服务端与客户端共享的整数契约，完整表见 [../RE
 - 内部类 `SqlConnPool`：`Acquire()` 取连接带 **3 秒超时**，池耗尽返回 nullptr（不永久阻塞）；后台健康检查线程周期性 `SELECT 1`（完整消费结果集），空闲连接按阈值 Reconnect
 - DAO 异常 catch 分支对连接执行 `reset()` 丢弃，避免脏连接回池（如 error 2014）
 - 主要 DAO 方法：`RegUserTransaction`（事务内 `UPDATE user_id SET id=LAST_INSERT_ID(id+1)` 取号并插入 user）、`CheckEmail` / `UpdatePassword` / `CheckPassword`、`GetUserByUid` / `GetUserByName`、`AddFriendApply`（`ON DUPLICATE KEY UPDATE status=0`）、`AuthFriendApply`（双向 UPDATE）、`AddFriend`（事务内双向 INSERT IGNORE）、`GetApplyList` / `GetFriendList`（JOIN）
-- `MysqlMganager`（注意拼写）是包装 `dao_` 的单例门面，业务层只接触管理器
+- `MysqlManager` 是包装 `dao_` 的单例门面，业务层只接触管理器、不直接引用 `MysqlDao`
 
 ### gRPC stub 池（rpc_stub_pool）
 

@@ -322,7 +322,7 @@ cd build-tests && ctest --output-on-failure
 ### 3.1 问题本质
 
 不是"单例有罪"，而是**两个问题叠加**：
-1. 单例是**具体类**，`LogicSystem` 写死 `MysqlMganager::GetInstance()`，无法替换成假实现。
+1. 单例是**具体类**，`LogicSystem` 写死 `MysqlManager::GetInstance()`，无法替换成假实现。
 2. 单例**构造函数做 IO**，一 new 就连库/建 channel。
 
 **目标：让 `LogicSystem` 依赖"接口"，而非"具体单例"。**
@@ -420,7 +420,7 @@ public:
 
 private:
     // 默认指向真实单例，保持生产行为 100% 不变
-    IUserRepository* db_    = &MysqlMganager::GetInstance();
+IUserRepository* db_    = &MysqlManager::GetInstance();
     ICache*          cache_ = &RedisManagerPool::GetInstance();
 };
 ```

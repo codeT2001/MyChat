@@ -182,7 +182,7 @@ sequenceDiagram
     A-->>R: SigRegisterResult
 ```
 
-> 验证码倒计时按钮为 `CountdownButton`；`/getVerifyCode` 的错误码用 VerifyServer 预留段：`0` 成功、`20001` 10 分钟内已获取过验证码、`20002` Redis 写入失败、`20003` 邮件发送失败（见 `Servers/VerifyServer/README.md`）。注意 `VERIFYCODE_NOT_FOUND_OR_EXPIRED(3)` 是注册/重置时验证码不存在或过期，与 `20001` 无关。
+> 验证码倒计时按钮为 `CountdownButton`；`/getVerifyCode` 的错误码用 VerifyServer 预留段：`0` 成功、`20001` 10 分钟内已获取过验证码、`20002` Redis 写入失败、`20003` 邮件发送失败（见 `Servers/VerifyServer/README.md`）。注意 `VERIFYCODE_NOT_FOUND_OR_EXPIRED(3)` 是注册/重置时验证码不存在或过期，与 `20001` 无关。客户端由 `AuthService::ErrorCodeToMessage()` 统一把错误码映射为提示文案，界面不再一律显示"参数错误"。
 
 ### 4.3 找回密码（重置）
 
@@ -346,7 +346,7 @@ sequenceDiagram
 
 ### 粘包 / 半包处理
 
-- 维护接收缓冲区 `buffer_`：头部不足 6 字节或 body 不足 `msgLength` 时置 `recvPedding_=true`，保留已解析的 msgId/msgLength 等待后续数据
+- 维护接收缓冲区 `buffer_`：头部不足 6 字节或 body 不足 `msgLength` 时置 `recvPending_=true`，保留已解析的 msgId/msgLength 等待后续数据
 - 每解析出完整帧，从缓冲区截掉头部 / body，循环处理（`forever`）
 
 ### 安全保护

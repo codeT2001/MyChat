@@ -12,6 +12,9 @@ constexpr uint32_t HEAD_ID_LENGTH = 2;
 constexpr uint32_t HEAD_DATA_LENGTH = 4;
 constexpr uint32_t MAX_SENDQUEUE_SIZE = 2000;
 
+// 帧头布局：msgId(2B) + body 长度(4B)；改动任一常量都会在此处编译期报错
+static_assert(HEAD_ID_LENGTH + HEAD_DATA_LENGTH == HEAD_TOTAL_LENGTH, "TCP frame header layout mismatch");
+
 inline void WriteUint16Net(void* dest, uint16_t value)
 {
     uint16_t net_val = htons(value);

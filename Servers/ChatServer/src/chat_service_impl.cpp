@@ -3,8 +3,7 @@
 #include "chat/mysql_manager.h"
 #include "user_manager.h"
 #include <chrono>
-#include <jsoncpp/json/value.h>
-#include <jsoncpp/json/reader.h>
+#include <jsoncpp/json/json.h>
 #include "chat/constants.h"
 #include "chat/log.h"
 #include "chat/redis_manager.h"
@@ -169,7 +168,7 @@ bool ChatServiceImpl::GetBaseInfo(const std::string& baseKey, int32_t uid, std::
         return true;
 	}
 
-	userInfo = MysqlMganager::GetInstance().GetUserByUid(uid);
+	userInfo = MysqlManager::GetInstance().GetUserByUid(uid);
 	if (!userInfo) {
 		return false;
 	}

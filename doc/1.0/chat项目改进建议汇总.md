@@ -257,7 +257,7 @@
 ### 🟡 P4-6 错误提示粒度粗 + 命名/遗留
 
 - **位置**：`Client/src/authservice.cpp:26`（统一"参数错误"）；`constants.h:65-68`（`MSG_IDS` 与 `RequestId` 重复）；`tcpmanager.cpp:130-133`（`InitHandlers()` 空函数）
-- **建议**：① 按 `ErrorCodes` 映射文案；② 清理死代码；③ 修正拼写（`recvPedding_`→`pending`、`cancle`）。
+- **建议**：~~① 按 `ErrorCodes` 映射文案~~（✅ 已做：`Client/src/authservice.cpp` 的 `ErrorCodeToMessage`）；~~② 清理死代码~~（✅ 已做：`MsgNode` 死方法、Node 未用导出）；~~③ 修正拼写~~（✅ 已做：`recvPending_`、`receive`、`MysqlManager`）。详见 `doc/调优记录.md`。
 
 ---
 

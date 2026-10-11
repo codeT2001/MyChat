@@ -22,7 +22,7 @@
 |---|---|
 | [server.js](../VerifyServer/server.js) | gRPC 服务入口，实现 `GetVerifyCode`，注册 SIGINT/SIGTERM 优雅关闭 |
 | [email.js](../VerifyServer/email.js) | nodemailer 单连接封装：发信、超时重建、指数退避重试 |
-| [redis.js](../VerifyServer/redis.js) | ioredis 客户端：`GetRedis` / `SetRedisExpire` / `QueryRedis` |
+| [redis.js](../VerifyServer/redis.js) | ioredis 客户端：`GetRedis` / `SetRedisExpire` |
 | [proto.js](../VerifyServer/proto.js) | 用 proto-loader 加载本目录 `message.proto` |
 | [constants.js](../VerifyServer/constants.js) | `code_prefix="code_"` 与本服务错误码（预留段 20001+） |
 | [config.js](../VerifyServer/config.js) | 从 `config.json` 读取邮箱账号与 Redis 地址 |

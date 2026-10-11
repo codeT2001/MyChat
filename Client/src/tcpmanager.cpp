@@ -71,13 +71,14 @@ TcpManager::TcpManager()
 
             recvPending_ = false;
             QByteArray body = buffer_.mid(0, msgLength_);
-            LOG_DEBUG() << "recive message body is : " << body;
-            HandleMsg(static_cast<RequestId>(msgId_), msgLength_, body);
+            // 只记录长度，不打印报文内容：登录回包含 token，日志落盘会泄露
+            LOG_DEBUG() << "receive message body, size:" << body.size();
+            HandleMsg(static_cast<RequestId>(msgId_), body);
             buffer_ = buffer_.mid(msgLength_);
         }
     });
 
-    connect(&socket_, &QTcpSocket::errorOccurred, this, [&](QAbstractSocket::SocketError socketError) {
+    connect(&socket_, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError socketError) {
         Q_UNUSED(socketError)
         // 错误日志，重连逻辑由 disconnected 信号统一处理
         LOG_WARN() << "socket error:" << socket_.errorString();
@@ -90,9 +91,7 @@ TcpManager::TcpManager()
 
 void TcpManager::Connect(ServerInfo info)
 {
-
     QAbstractSocket::SocketState state = socket_.state();
-
     if (state != QAbstractSocket::UnconnectedState) {
         LOG_WARN() << "Connection already in progress or connected. State:" << state;
         return;
@@ -124,9 +123,8 @@ void TcpManager::Send(RequestId id, const QByteArray &data)
     }
 }
 
-void TcpManager::HandleMsg(RequestId id, int32_t len, const QByteArray &data)
+void TcpManager::HandleMsg(RequestId id, const QByteArray &data)
 {
-    Q_UNUSED(len)
     if (id == RequestId::CHAT_HEARTBEAT) {
         // 心跳响应（PONG），收到即说明连接存活，仅记录日志
         LOG_DEBUG() << "heartbeat pong received";
