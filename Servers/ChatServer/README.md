@@ -18,7 +18,7 @@
 | 模块 | 说明 |
 |------|------|
 | CServer | TCP 服务器，accept 连接、管理 session 增删（`RemoveSession`，session 通过 `SetRemoveCallback` 反向通知） |
-| CSession | 客户端会话：异步读 4 字节包头 → 读 JSON 体 → 投队列；发送队列 + 异步写 |
+| CSession | 客户端会话：异步读 6 字节包头 → 读 JSON 体 → 投队列；发送队列 + 异步写 |
 | MsgNode | 收包节点（含 msgId、当前长度、扩容逻辑） |
 | LogicSystem | 业务核心：注册 `handleFuncs_`（msgId → Handler），单线程消费队列 |
 | UserManager | 内存中 uid → shared_ptr\<CSession\> 映射（互斥保护） |
@@ -30,7 +30,7 @@
 ```mermaid
 flowchart TD
     ACC[Asio 线程 accept] --> S[创建 CSession 并 StartRead 包头]
-    S --> H["读到 4 字节：msgId(2) + len(2)"]
+    S --> H["读到 6 字节：msgId(2) + len(4)"]
     H --> CHK{"len > MAX_MSG_LENGTH(2048)?"}
     CHK -- 是 --> CLOSE[拒绝并关闭连接]
     CHK -- 否 --> B[按 len 异步读 JSON body]
@@ -49,7 +49,7 @@ flowchart TD
 
 ## 消息协议
 
-帧格式（**网络字节序 / 大端**，通过 `htons`/`ntohs` 转换）：`2 字节 msgId + 2 字节 body 长度 + JSON body`。客户端 Qt 侧对应 `QDataStream::BigEndian`。
+帧格式（**网络字节序 / 大端**，通过 `htons`/`ntohs`/`htonl`/`ntohl` 转换）：`2 字节 msgId + 4 字节 body 长度 + JSON body`。客户端 Qt 侧对应 `QDataStream::BigEndian`。
 
 > ⚠️ **单帧 body 硬上限 `MAX_MSG_LENGTH = 2048` 字节**（定义在 `csession.h`）。超限帧被直接拒绝并断开连接；客户端发送更长内容必须自行分批。
 

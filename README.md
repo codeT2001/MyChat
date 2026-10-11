@@ -86,7 +86,7 @@ graph TB
     end
 
     Client -- "① HTTP 注册/登录/验证码/改密" --> Gate
-    Client -. "③ TCP 长连接（2B msgId + 2B len + JSON）" .-> Chat1
+    Client -. "③ TCP 长连接（2B msgId + 4B len + JSON）" .-> Chat1
     Client -. "③ TCP 长连接" .-> Chat2
 
     Gate -- "gRPC GetVerifyCode" --> Verify
@@ -150,10 +150,10 @@ sequenceDiagram
 ```
 +--------+--------+---------------------+
 | msgId  |  len   |        body         |
-| uint16 | uint16 |  len 字节的 JSON    |
+| uint16 | uint32 |  len 字节的 JSON    |
 | 大端序 | 大端序 |                     |
 +--------+--------+---------------------+
-          2B        2B          变长
+          2B        4B          变长
 ```
 
 - `msgId` 取值见 `Servers/common/include/chat/constants.h` 的 `MSG_IDS`（10001 ~ 99999）。

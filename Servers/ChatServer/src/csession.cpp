@@ -7,9 +7,9 @@
 #include "logic_system.h"
 namespace P1 {
 namespace {
-constexpr uint32_t HEAD_TOTAL_LENGTH = 4;
+constexpr uint32_t HEAD_TOTAL_LENGTH = 6;
 constexpr uint32_t HEAD_ID_LENGTH = 2;
-constexpr uint32_t HEAD_DATA_LENGTH = 2;
+constexpr uint32_t HEAD_DATA_LENGTH = 4;
 constexpr uint32_t MAX_SENDQUEUE_SIZE = 2000;
 
 inline void WriteUint16Net(void* dest, uint16_t value)
@@ -23,6 +23,19 @@ inline uint16_t ReadUint16Net(const void* src)
     uint16_t val = 0;
     memcpy(&val, src, sizeof(val));
     return ntohs(val);
+}
+
+inline void WriteUint32Net(void* dest, uint32_t value)
+{
+    uint32_t net_val = htonl(value);
+    memcpy(dest, &net_val, sizeof(net_val));
+}
+
+inline uint32_t ReadUint32Net(const void* src)
+{
+    uint32_t val = 0;
+    memcpy(&val, src, sizeof(val));
+    return ntohl(val);
 }
 } // namespace
 
@@ -81,19 +94,19 @@ void CSession::ReadMessageHead(const boost::system::error_code& ec, std::size_t 
 
     msgHeadNode_->SetCurLen(HEAD_TOTAL_LENGTH);
     uint16_t msgId = ReadUint16Net(msgHeadNode_->GetData());
-    uint16_t bodySize = ReadUint16Net(msgHeadNode_->GetData() + HEAD_ID_LENGTH);
+    uint32_t bodySize = ReadUint32Net(msgHeadNode_->GetData() + HEAD_ID_LENGTH);
     if (bodySize > MAX_MSG_LENGTH) {
         LOG_ERROR("[Session] invalid body size, sessionId:%u, msgId:%u, bodySize:%u", sessionId_, msgId, bodySize);
         Close();
         return;
     }
 
-    msgBodyNode_ = std::make_shared<MsgNode>(bodySize, msgId);
-    msgBodyNode_->SetCurLen(bodySize);
+    msgBodyNode_ = std::make_shared<MsgNode>(static_cast<uint16_t>(bodySize), msgId);
+    msgBodyNode_->SetCurLen(static_cast<uint16_t>(bodySize));
     ReadMessageBody(bodySize);
 }
 
-void CSession::ReadMessageBody(uint16_t bodySize)
+void CSession::ReadMessageBody(uint32_t bodySize)
 {
     if (isClose_.load()) {
         return;
@@ -158,7 +171,7 @@ void CSession::SendMessage(const char* data, size_t len, uint16_t msgId)
     auto msgNode = std::make_shared<MsgNode>(len + HEAD_TOTAL_LENGTH, msgId);
 
     WriteUint16Net(msgNode->GetData(), msgId);
-    WriteUint16Net(msgNode->GetData() + HEAD_ID_LENGTH, static_cast<uint16_t>(len));
+    WriteUint32Net(msgNode->GetData() + HEAD_ID_LENGTH, static_cast<uint32_t>(len));
 
     if (len > 0 && data != nullptr) {
         memcpy(msgNode->GetData() + HEAD_TOTAL_LENGTH, data, len);

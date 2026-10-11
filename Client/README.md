@@ -330,13 +330,13 @@ sequenceDiagram
 
 ### 帧格式
 
-`TcpManager` 与 ChatServer 之间使用自定义二进制帧（`QDataStream::BigEndian`，与服务端 `htons` 对应）：
+`TcpManager` 与 ChatServer 之间使用自定义二进制帧（`QDataStream::BigEndian`，与服务端 `htons`/`htonl` 对应）：
 
 ```
 ┌──────────┬──────────┬─────────────────────┐
 │  msgId   │ msgLength│        body         │
-│ uint16   │ uint16   │   JSON（UTF-8 字节） │
-│ 2 字节    │ 2 字节    │  msgLength 字节      │
+│ uint16   │ uint32   │   JSON（UTF-8 字节） │
+│ 2 字节    │ 4 字节    │  msgLength 字节      │
 └──────────┴──────────┴─────────────────────┘
 ```
 
@@ -346,7 +346,7 @@ sequenceDiagram
 
 ### 粘包 / 半包处理
 
-- 维护接收缓冲区 `buffer_`：头部不足 4 字节或 body 不足 `msgLength` 时置 `recvPedding_=true`，保留已解析的 msgId/msgLength 等待后续数据
+- 维护接收缓冲区 `buffer_`：头部不足 6 字节或 body 不足 `msgLength` 时置 `recvPedding_=true`，保留已解析的 msgId/msgLength 等待后续数据
 - 每解析出完整帧，从缓冲区截掉头部 / body，循环处理（`forever`）
 
 ### 安全保护

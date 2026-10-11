@@ -1,7 +1,7 @@
 #include "tcpmanager.h"
 #include "logger.h"
 namespace {
-constexpr uint32_t MSG_HEAD_LENGTH = sizeof(uint16_t) * 2; // msgId + msgLength
+constexpr uint32_t MSG_HEAD_LENGTH = sizeof(uint16_t) + sizeof(uint32_t); // msgId + msgLength
 constexpr int MAX_RECV_BUFFER_SIZE = 1024 * 1024;          // 接收缓冲区上限 1MB
 constexpr int MAX_MSG_BODY_SIZE = 10 * 1024 * 1024;        // 单条消息体上限 10MB
 } // namespace
@@ -107,7 +107,7 @@ void TcpManager::Send(RequestId id, const QByteArray &data)
 {
     LOG_DEBUG() << "msgId : " << static_cast<uint32_t>(id) << "send data : " << QString(data);
     uint16_t copyId = static_cast<uint16_t>(id);
-    uint16_t len = static_cast<uint16_t>(data.size());
+    uint32_t len = static_cast<uint32_t>(data.size());
     QByteArray block;
     block.reserve(MSG_HEAD_LENGTH + data.size());
     QDataStream out(&block, QIODevice::WriteOnly);

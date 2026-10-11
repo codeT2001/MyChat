@@ -77,7 +77,7 @@ auto tokenValue = RedisManagerPool::GetInstance().Get(tokenKey);  // 无法 mock
 
 | 测试项 | 位置 | 测什么 |
 |--------|------|--------|
-| 帧编解码 | `csession.cpp` `WriteUint16Net/ReadUint16Net` | 大端字节序、往返一致 |
+| 帧编解码 | `csession.cpp` `WriteUint16Net/ReadUint16Net`、`WriteUint32Net/ReadUint32Net` | 大端字节序、往返一致 |
 | 帧长度越界 | 接收逻辑 `bodySize > MAX_MSG_LENGTH` | 超长包被拒 |
 | 半包/粘包 | 客户端 `tcpmanager.cpp` 状态机 | 一次收到 1.5 包 |
 | URL 查询解析 | `http_connection.cpp` `PreParseGetParams` | `?a=1&b=2` + `UrlDecode` |
@@ -154,31 +154,48 @@ static uint16_t ReadUint16Net(const void* src) {
     memcpy(&val, src, sizeof(val));
     return ntohs(val);
 }
+static void WriteUint32Net(void* dest, uint32_t value) {
+    uint32_t net_val = htonl(value);
+    memcpy(dest, &net_val, sizeof(net_val));
+}
+static uint32_t ReadUint32Net(const void* src) {
+    uint32_t val = 0;
+    memcpy(&val, src, sizeof(val));
+    return ntohl(val);
+}
 
 TEST(FrameCodec, BigEndianRoundTrip) {
-    uint8_t buf[2];
-    WriteUint16Net(buf, 0x0102);
+    uint8_t buf[4];
+    WriteUint32Net(buf, 0x01020304);
     EXPECT_EQ(buf[0], 0x01);          // 大端：高字节在前
     EXPECT_EQ(buf[1], 0x02);
-    EXPECT_EQ(ReadUint16Net(buf), 0x0102);   // 往返一致
+    EXPECT_EQ(buf[2], 0x03);
+    EXPECT_EQ(buf[3], 0x04);
+    EXPECT_EQ(ReadUint32Net(buf), 0x01020304);   // 往返一致
+}
+
+TEST(FrameCodec, MsgIdRoundTrip) {
+    uint8_t buf[2];
+    WriteUint16Net(buf, 10001);
+    EXPECT_EQ(ReadUint16Net(buf), 10001);
 }
 
 TEST(FrameCodec, MaxValue) {
-    uint8_t buf[2];
-    WriteUint16Net(buf, 0xFFFF);
-    EXPECT_EQ(ReadUint16Net(buf), 0xFFFF);
+    uint8_t buf[4];
+    WriteUint32Net(buf, 0xFFFFFFFF);
+    EXPECT_EQ(ReadUint32Net(buf), 0xFFFFFFFF);
 }
 
 TEST(FrameCodec, ZeroLength) {
-    uint8_t buf[2];
-    WriteUint16Net(buf, 0);
-    EXPECT_EQ(ReadUint16Net(buf), 0);
+    uint8_t buf[4];
+    WriteUint32Net(buf, 0);
+    EXPECT_EQ(ReadUint32Net(buf), 0);
 }
 
 // 帧长度越界——超长 body 必须被拒（csession.cpp:85 的防护）
 TEST(FrameCodec, OversizeBodyRejected) {
     constexpr uint32_t MAX_MSG_LENGTH = 1024 * 2;
-    uint16_t bodySize = 65535;
+    uint32_t bodySize = 0xFFFFFFFF;
     EXPECT_GT(bodySize, MAX_MSG_LENGTH);   // 应触发 Close()
 }
 ```
@@ -533,13 +550,14 @@ bool MysqlDao::Connect();
 
 using boost::asio::ip::tcp;
 
-// 发送一个 TCP 帧：2B msgId + 2B len + body（大端）
+// 发送一个 TCP 帧：2B msgId + 4B len + body（大端）
 static void SendFrame(tcp::socket& sock, uint16_t msgId, const std::string& body) {
-    std::vector<uint8_t> buf(4 + body.size());
-    uint16_t id = htons(msgId), len = htons(static_cast<uint16_t>(body.size()));
+    std::vector<uint8_t> buf(6 + body.size());
+    uint16_t id = htons(msgId);
+    uint32_t len = htonl(static_cast<uint32_t>(body.size()));
     memcpy(buf.data(), &id, 2);
-    memcpy(buf.data() + 2, &len, 2);
-    memcpy(buf.data() + 4, body.data(), body.size());
+    memcpy(buf.data() + 2, &len, 4);
+    memcpy(buf.data() + 6, body.data(), body.size());
     boost::asio::write(sock, boost::asio::buffer(buf));
 }
 
@@ -550,11 +568,11 @@ TEST(NetLogin, ReceivesLoginRsp) {
 
     SendFrame(sock, 10001 /*CHAT_LOGIN_REQ*/, R"({"uid":1001,"token":"xxx"})");
 
-    // 读 4 字节包头 + body
-    uint8_t head[4];
-    boost::asio::read(sock, boost::asio::buffer(head, 4));
+    // 读 6 字节包头 + body
+    uint8_t head[6];
+    boost::asio::read(sock, boost::asio::buffer(head, 6));
     uint16_t rspId = ntohs(*reinterpret_cast<uint16_t*>(head));
-    uint16_t bodyLen = ntohs(*reinterpret_cast<uint16_t*>(head + 2));
+    uint32_t bodyLen = ntohl(*reinterpret_cast<uint32_t*>(head + 2));
     EXPECT_EQ(rspId, 10002);   // CHAT_LOGIN_RSP
 }
 ```

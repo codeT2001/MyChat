@@ -152,7 +152,7 @@ Start() → async_read 读完整请求
 | 类 | 文件 | 职责 |
 |----|------|------|
 | `CServer` | `cserver.cpp` | acceptor + session 表（`unordered_map<uint32_t, weak_ptr<CSession>>`） |
-| `CSession` | `csession.cpp` | 单连接读写、4 字节帧编解码、发送队列 |
+| `CSession` | `csession.cpp` | 单连接读写、6 字节帧头编解码、发送队列 |
 | `LogicSystem` | `logic_system.cpp` | 业务单线程队列、msgId 分发 |
 | `UserManager` | `user_manager.cpp` | `uid → session` 映射 |
 | `ChatServiceImpl` | `chat_service_impl.cpp` | gRPC 服务端（被跨服调用时推送本节点用户） |
@@ -279,13 +279,13 @@ MainWindow（"壳"，动态切换四页）
 
 ```
 ┌─────────────┬─────────────┬──────────────────────┐
-│  msgId (2B) │  len (2B)   │   JSON body (len 字节) │
-│  大端 uint16 │  大端 uint16 │     UTF-8 JSON        │
+│  msgId (2B) │  len (4B)   │   JSON body (len 字节) │
+│  大端 uint16 │  大端 uint32 │     UTF-8 JSON        │
 └─────────────┴─────────────┴──────────────────────┘
-头部共 4 字节（HEAD_TOTAL_LENGTH）
+头部共 6 字节（HEAD_TOTAL_LENGTH）
 ```
-- 发送：`htons` 写大端；接收：两阶段异步读（先读 4B 包头，再按 bodySize 读 body）。
-- 单帧 body 上限：服务端 `MAX_MSG_LENGTH = 2048`；`uint16` 硬上限 65535。
+- 发送：`htons`/`htonl` 写大端；接收：两阶段异步读（先读 6B 包头，再按 bodySize 读 body）。
+- 单帧 body 上限：服务端 `MAX_MSG_LENGTH = 2048`；长度字段为 4 字节 `uint32`。
 
 **消息号表**：
 

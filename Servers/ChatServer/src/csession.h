@@ -35,7 +35,7 @@ public:
 private:
     void OnDisconnected();
     void ReadMessageHead(const boost::system::error_code& ec, std::size_t readLength);
-    void ReadMessageBody(uint16_t bodySize);
+    void ReadMessageBody(uint32_t bodySize);
     void DoWrite();
     void HandleWrite(const boost::system::error_code& ec);
     void Close();

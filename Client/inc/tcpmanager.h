@@ -56,7 +56,7 @@ private:
     QByteArray buffer_;
     bool recvPending_;
     uint16_t msgId_;
-    uint16_t msgLength_;
+    uint32_t msgLength_;
 
     // 心跳 & 重连
     QTimer *heartbeatTimer_;

@@ -12,7 +12,7 @@
 | 通道 | 方向 | 序列化 | 协议 | 代码位置 |
 |------|------|--------|------|----------|
 | HTTP | 客户端 → GateServer | **JSON** | REST | `Client/src/httpmanager.cpp` |
-| TCP 长连接 | 客户端 ↔ ChatServer | **JSON**（塞在自定义帧里） | `msgId(2B)+len(2B)+JSON` | `Client/src/tcpmanager.cpp` / `Servers/ChatServer/src/csession.cpp` |
+| TCP 长连接 | 客户端 ↔ ChatServer | **JSON**（塞在自定义帧里） | `msgId(2B)+len(4B)+JSON` | `Client/src/tcpmanager.cpp` / `Servers/ChatServer/src/csession.cpp` |
 | gRPC | 服务 ↔ 服务 | **Protobuf** | gRPC/HTTP2 | `Servers/common/proto/message.proto` |
 
 **核心事实：项目已经在用 Protobuf 和 gRPC 了** —— 服务间通信就是。真正的问题有两个：
@@ -58,7 +58,7 @@ int from_uid = root["from_uid"].asInt();  int to_uid = root["to_uid"].asInt();
 - 适合：不想动协议，只想止血。
 
 #### 方案 B：TCP 帧 body 换 Protobuf（中等）
-- 保留 `msgId(2B)+len(2B)` 帧头，把 JSON body 换成 Protobuf 序列化字节。
+- 保留 `msgId(2B)+len(4B)` 帧头，把 JSON body 换成 Protobuf 序列化字节。
 - 需要决策：**每个 msgId 一个 message，还是一个大 oneof**：
 
 ```protobuf

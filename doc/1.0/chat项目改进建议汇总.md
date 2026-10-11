@@ -133,10 +133,10 @@
 
 > 📎 本节 P2-3/P2-5/P2-6 的**方案展开**（Protobuf / RabbitMQ / Redis Stream / WebSocket 选型）见 `chat网络传输与中间件改进.md`。
 
-### 🟠 P2-1 TCP 单帧 uint16 截断无校验
+### 🟠 P2-1 TCP 单帧长度字段未校验发送上限
 
-- **位置**：`Servers/ChatServer/src/csession.cpp:161`（发送）；`:85`（接收校验）
-- **问题**：长度字段 `uint16_t` 硬上限 65535，发送侧强转却未校验上限；客户端/服务端 `MAX_MSG_LENGTH` 定义不一致（服务端 2048）。
+- **位置**：`Servers/ChatServer/src/csession.cpp:174`（发送）；`:98`（接收校验）
+- **问题**：长度字段已扩展为 `uint32_t`，发送侧强转却未校验上限；客户端/服务端 `MAX_MSG_LENGTH` 定义不一致（服务端 2048）。
 - **建议**：① 发送前断言上限，超限走分片；② 统一常量（单一来源）。
 
 ### 🟠 P2-2 发送队列满静默丢消息

@@ -52,7 +52,7 @@ cmake --build build -j$(nproc)
 
 ## 关键约束与易踩坑
 
-- **TCP 帧**：`2 字节 msgId + 2 字节长度 + JSON`（大端）；单帧 body 上限 `MAX_MSG_LENGTH = 2048`，超限直接断连。
+- **TCP 帧**：`2 字节 msgId + 4 字节长度 + JSON`（大端）；单帧 body 上限 `MAX_MSG_LENGTH = 2048`，超限直接断连。
 - **业务串行**：ChatServer 所有 Handler 跑在同一逻辑线程，禁止长时间阻塞；跨服 gRPC 为同步调用且未设 deadline。
 - **必须存在 `user_id` 发号器表**，否则注册事务（`LAST_INSERT_ID(id+1)`）失败。
 - **Redis 键无 TTL**：`utoken_{uid}` / `userver_{uid}` 在进程异常退出时会残留，靠下次登录顶号流程覆盖自愈。
