@@ -41,6 +41,6 @@ private:
     std::map<std::string, HttpHandler> postHandlers_;
     std::map<std::string, HttpHandler> getHandlers_;
 };
-} // namespace _P1_LOGIC_SYSTEM_H_
+} // namespace P1
 
-#endif
+#endif //  _P1_LOGIC_SYSTEM_H_

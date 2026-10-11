@@ -62,6 +62,33 @@ void AppendFriendList(Json::Value &dst, const std::vector<std::shared_ptr<UserIn
         dst["friend_list"].append(obj);
     }
 }
+
+// Handler 公共骨架：解析请求体，并在作用域结束时按 rspId 统一回包。
+// 消除各 handler 里重复的「Json::Reader 解析 → 组装响应 JSON → Defer 回包」样板，
+// 同时保证每条分支 return 都会回包（与原 Defer 行为一致）。
+class HandlerContext {
+public:
+    HandlerContext(const std::shared_ptr<CSession> &session, MSG_IDS rspId, const std::string &msg)
+        : session_(session), rspId_(rspId)
+    {
+        Json::Reader reader;
+        reader.parse(msg, request_);
+    }
+
+    ~HandlerContext()
+    {
+        session_->SendMessage(response_.toStyledString(), static_cast<uint16_t>(rspId_));
+    }
+
+    const Json::Value &Request() const { return request_; }
+    Json::Value &Response() { return response_; }
+
+private:
+    std::shared_ptr<CSession> session_;
+    MSG_IDS rspId_;
+    Json::Value request_;
+    Json::Value response_;
+};
 } // namespace
 LogicSystem::LogicSystem() : stop_(false)
 {
@@ -131,16 +158,11 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
 {
     // 注意：请求体含 token，禁止整体打印
     LOG_DEBUG("[LogicSystem] HandleLogin, msgId:%u", msgId);
-    Json::Reader reader;
-    Json::Value src;
-    reader.parse(msg, src);
+    HandlerContext ctx(session, MSG_IDS::CHAT_LOGIN_RSP, msg);
+    const Json::Value& src = ctx.Request();
+    Json::Value& retValue = ctx.Response();
     auto uid = src["uid"].asInt();
     auto token = src["token"].asString();
-    Json::Value retValue;
-    // 无论从哪个分支返回，统一发送登录响应
-    Defer defer([&]() {
-        session->SendMessage(retValue.toStyledString(), static_cast<uint16_t>(MSG_IDS::CHAT_LOGIN_RSP));
-    });
 
     // 查询token是否正确
     auto uid_str = std::to_string(uid);
@@ -290,15 +312,10 @@ bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::s
 void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg)
 {
     LOG_DEBUG("[LogicSystem] HandleSearchUser, msgId:%u", msgId);
-    Json::Reader reader;
-    Json::Value src;
-    reader.parse(msg, src);
+    HandlerContext ctx(session, MSG_IDS::SEARCH_USER_RSP, msg);
+    const Json::Value& src = ctx.Request();
+    Json::Value& rtValue = ctx.Response();
     auto uidStr = src["uid"].asString();
-    Json::Value rtValue;
-    // 无论从哪个分支返回，统一发送查询响应
-    Defer defer([&]() {
-        session->SendMessage(rtValue.toStyledString(), static_cast<uint16_t>(MSG_IDS::SEARCH_USER_RSP));
-    });
 
     // uid 必须为纯数字，避免 stoi 抛异常导致无法回复客户端
     if (uidStr.empty() || !std::all_of(uidStr.begin(), uidStr.end(), [](unsigned char c) { return std::isdigit(c); })) {
@@ -336,9 +353,9 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
 void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg)
 {
     LOG_DEBUG("[LogicSystem] HandleAddFriend, msgId:%u", msgId);
-    Json::Reader reader;
-    Json::Value src;
-    reader.parse(msg, src);
+    HandlerContext ctx(session, MSG_IDS::ADD_FRIEND_RSP, msg);
+    const Json::Value& src = ctx.Request();
+    Json::Value& rtValue = ctx.Response();
     auto from_uid = src["from_uid"].asInt();
     auto to_uid = src["to_uid"].asInt();
     auto name = src["name"].asString();
@@ -347,11 +364,7 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
     (void)remark_name;
 
     // 通知逻辑结束后统一给申请者回包
-    Json::Value rtValue;
     rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-    Defer defer([&]() {
-        session->SendMessage(rtValue.toStyledString(), static_cast<uint16_t>(MSG_IDS::ADD_FRIEND_RSP));
-    });
 
     MysqlManager::GetInstance().AddFriendApply(from_uid, to_uid);
     auto to_server = GetPeerServer(to_uid);
@@ -395,21 +408,16 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
 void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg)
 {
     LOG_DEBUG("[LogicSystem] HandleAuthFriend, msgId:%u", msgId);
-    Json::Reader reader;
-    Json::Value src;
-    reader.parse(msg, src);
+    HandlerContext ctx(session, MSG_IDS::AUTH_FRIEND_RSP, msg);
+    const Json::Value& src = ctx.Request();
+    Json::Value& rtValue = ctx.Response();
     auto peer_uid = src["from_uid"].asInt();   // 申请者
     auto self_uid = src["to_uid"].asInt();     // 处理者（本人）
     auto remark_name = src["remark_name"].asString();
     // 旧客户端不带 action，默认同意
     auto action = src.isMember("action") ? src["action"].asInt() : FRIEND_ACTION_ACCEPT;
 
-    Json::Value rtValue;
     rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-    // 无论从哪个分支返回，统一给处理者回 AUTH_FRIEND_RSP
-    Defer defer([&]() {
-        session->SendMessage(rtValue.toStyledString(), static_cast<uint16_t>(MSG_IDS::AUTH_FRIEND_RSP));
-    });
 
     if (action != FRIEND_ACTION_ACCEPT && action != FRIEND_ACTION_REJECT) {
         LOG_WARN("[LogicSystem] HandleAuthFriend invalid action:%d, from:%d, to:%d", action, peer_uid, self_uid);
@@ -511,22 +519,16 @@ void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t a
 // 处理文本聊天消息 self_uid ---> peer_uid
 void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg) {
     LOG_INFO("[LogicSystem] HandleTextChatMsg, msgId:%d, msg:%s", msgId, msg.c_str());
-    Json::Reader reader;
-    Json::Value src;
-    reader.parse(msg, src);
+    HandlerContext ctx(session, MSG_IDS::TEXT_CHAT_MSG_RSP, msg);
+    const Json::Value& src = ctx.Request();
+    Json::Value& rtvalue = ctx.Response();
     auto self_uid = src["from_uid"].asInt();   // 发送者
     auto peer_uid = src["to_uid"].asInt();     // 接收者
     const Json::Value array = src["text_array"];
-    Json::Value rtvalue;
     rtvalue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
     rtvalue["text_array"] = array;
     rtvalue["from_uid"] = self_uid;
     rtvalue["to_uid"] = peer_uid;
-
-    Defer defer([this, &rtvalue, session]() {
-        std::string return_str = rtvalue.toStyledString();
-        session->SendMessage(return_str, static_cast<uint16_t>(MSG_IDS::TEXT_CHAT_MSG_RSP));
-    });
 
     //查询redis 查找peer_uid对应的server ip
     auto peer_server = GetPeerServer(peer_uid);

@@ -14,25 +14,46 @@ namespace {
 // 与 VerifyServer/constants.js 的 code_prefix 保持一致
 constexpr char CODE_PREFIX[] = "code_";
 
-// 解析 POST 请求体并校验必填 string 字段。
-// 失败时向 rsp 写入 ERROR_JSON 并返回 false（四个 POST 处理器共用）
-bool ParseBody(const std::shared_ptr<HttpConnection> &conn, Json::Value &src, Json::Value &rsp,
-               std::initializer_list<const char *> fields)
-{
-    const auto bodyStr = beast::buffers_to_string(conn->GetRequest().body().data());
-    Json::Reader reader;
-    if (!reader.parse(bodyStr, src)) {
-        rsp["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
-        return false;
-    }
-    for (const auto *field : fields) {
-        if (!src.isMember(field) || !src[field].isString()) {
-            rsp["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
-            return false;
+// HTTP JSON 处理器公共骨架：设置 JSON 响应头 → 解析请求体并校验必填 string 字段，
+// 作用域结束时把响应体写回。解析或校验失败时置 ERROR_JSON 并令 Valid() 为 false。
+// 收敛四个 POST 处理器重复的「set content-type → Json::Value src/root → Defer 写回」样板。
+class HttpJsonContext {
+public:
+    HttpJsonContext(const std::shared_ptr<HttpConnection> &conn,
+                    std::initializer_list<const char *> fields)
+        : conn_(conn)
+    {
+        conn_->GetResponse().set(http::field::content_type, "application/json");
+        const auto bodyStr = beast::buffers_to_string(conn_->GetRequest().body().data());
+        Json::Reader reader;
+        if (!reader.parse(bodyStr, request_)) {
+            response_["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+            return;
         }
+        for (const auto *field : fields) {
+            if (!request_.isMember(field) || !request_[field].isString()) {
+                response_["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+                return;
+            }
+        }
+        valid_ = true;
     }
-    return true;
-}
+
+    ~HttpJsonContext()
+    {
+        beast::ostream(conn_->GetResponse().body()) << response_.toStyledString();
+    }
+
+    bool Valid() const { return valid_; }
+    const Json::Value &Request() const { return request_; }
+    Json::Value &Response() { return response_; }
+
+private:
+    std::shared_ptr<HttpConnection> conn_;
+    Json::Value request_;
+    Json::Value response_;
+    bool valid_ = false;
+};
 
 // 校验邮箱验证码：不存在或已过期返回 false
 bool CheckVerifyCode(const std::string &email, const std::string &code)
@@ -94,18 +115,13 @@ void LogicSystem::HandleGetTest(HttpConnPtr conn)
 
 void LogicSystem::HandleGetVerifyCode(HttpConnPtr conn)
 {
-    auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json");
-    Json::Value root;
-    Json::Value src;
-    Defer defer([&]() {
-        beast::ostream(response.body()) << root.toStyledString();
-    });
-
-    if (!ParseBody(conn, src, root, {"email"})) {
+    HttpJsonContext ctx(conn, {"email"});
+    if (!ctx.Valid()) {
         LOG_WARN("[GateServer] GetVerifyCode bad request, invalid json or missing email");
         return;
     }
+    const Json::Value& src = ctx.Request();
+    Json::Value& root = ctx.Response();
     auto email = src["email"].asString();
     LOG_INFO("[GateServer] GetVerifyCode, email:%s", email.c_str());
     GetVerifyRsp rsp = VerifyGrpcClient::GetInstance().GetVerifyCode(email);
@@ -117,19 +133,13 @@ void LogicSystem::HandleRegisterUser(HttpConnPtr conn)
 {
     LOG_INFO("[GateServer] RegisterUser request");
 
-    auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json");
-
-    Json::Value root;
-    Json::Value src;
-    Defer defer([&]() {
-        beast::ostream(response.body()) << root.toStyledString();
-    });
-
-    if (!ParseBody(conn, src, root, {"email", "verifyCode", "passwd"})) {
+    HttpJsonContext ctx(conn, {"email", "verifyCode", "passwd"});
+    if (!ctx.Valid()) {
         LOG_WARN("[GateServer] RegisterUser failed, invalid json or missing fields");
         return;
     }
+    const Json::Value& src = ctx.Request();
+    Json::Value& root = ctx.Response();
 
     std::string email = src["email"].asString();
     std::string verifyCode = src["verifyCode"].asString();
@@ -165,19 +175,13 @@ void LogicSystem::HandleResetPassword(HttpConnPtr conn)
 {
     LOG_INFO("[GateServer] ResetPassword request");
 
-    auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json");
-
-    Json::Value root;
-    Json::Value src;
-    Defer defer([&]() {
-        beast::ostream(response.body()) << root.toStyledString();
-    });
-
-    if (!ParseBody(conn, src, root, {"email", "verifyCode", "passwd"})) {
+    HttpJsonContext ctx(conn, {"email", "verifyCode", "passwd"});
+    if (!ctx.Valid()) {
         LOG_WARN("[GateServer] ResetPassword failed, invalid json or missing fields");
         return;
     }
+    const Json::Value& src = ctx.Request();
+    Json::Value& root = ctx.Response();
 
     std::string email = src["email"].asString();
     std::string verifyCode = src["verifyCode"].asString();
@@ -211,19 +215,13 @@ void LogicSystem::HandleUserLogin(HttpConnPtr conn)
 {
     LOG_INFO("[GateServer] UserLogin request");
 
-    auto& response = conn->GetResponse();
-    response.set(http::field::content_type, "application/json");
-
-    Json::Value root;
-    Json::Value src;
-    Defer defer([&]() {
-        beast::ostream(response.body()) << root.toStyledString();
-    });
-
-    if (!ParseBody(conn, src, root, {"passwd", "name"})) {
+    HttpJsonContext ctx(conn, {"passwd", "name"});
+    if (!ctx.Valid()) {
         LOG_WARN("[GateServer] UserLogin failed, invalid json or missing fields");
         return;
     }
+    const Json::Value& src = ctx.Request();
+    Json::Value& root = ctx.Response();
     std::string name = src["name"].asString();
     std::string pwd = src["passwd"].asString();
     root["name"] = name;
