@@ -24,7 +24,7 @@
 | [email.js](../VerifyServer/email.js) | nodemailer 单连接封装：发信、超时重建、指数退避重试 |
 | [redis.js](../VerifyServer/redis.js) | ioredis 客户端：`GetRedis` / `SetRedisExpire` / `QueryRedis` |
 | [proto.js](../VerifyServer/proto.js) | 用 proto-loader 加载本目录 `message.proto` |
-| [constants.js](../VerifyServer/constants.js) | `code_prefix="code_"` 与本服务自有错误码 |
+| [constants.js](../VerifyServer/constants.js) | `code_prefix="code_"` 与本服务错误码（预留段 20001+） |
 | [config.js](../VerifyServer/config.js) | 从 `config.json` 读取邮箱账号与 Redis 地址 |
 | [config.json](../VerifyServer/config.json) | 邮箱 user/pass、Redis host/port（**含真实凭据，严禁提交/外泄**） |
 | [message.proto](../VerifyServer/message.proto) | proto 副本（对应 `common/proto/message.proto` 的 VerifyService） |
@@ -48,15 +48,15 @@ graph LR
 flowchart TD
     Req["gRPC GetVerifyCode(email)"] --> Chk["GET code_{email}"]
     Chk --> Exist{"验证码已存在?"}
-    Exist -- 是 --> RExist["返回 VERIFICATION_CODE_EXISTS(3)<br/>（10 分钟内不重复发信）"]
+    Exist -- 是 --> RExist["返回 VERIFY_CODE_EXISTS(20001)<br/>（10 分钟内不重复发信）"]
     Exist -- 否 --> Gen["uuid 截 4 位生成验证码"]
     Gen --> Store["SET code_{email} = 验证码，EXPIRE 600s"]
     Store --> OK1{"写入成功?"}
-    OK1 -- 否 --> RErr["返回 REDIS_ERROR(1)"]
+    OK1 -- 否 --> RErr["返回 VERIFY_REDIS_ERROR(20002)"]
     OK1 -- 是 --> Mail["nodemailer 发送验证码邮件"]
     Mail --> OK2{"发送成功?"}
     OK2 -- 是 --> ROk["返回 SUCCESS(0)"]
-    OK2 -- 否 --> RExc["返回 EXCEPTION(2)"]
+    OK2 -- 否 --> RExc["返回 VERIFY_MAIL_FAILED(20003)"]
 ```
 
 ## 时序图：获取验证码
@@ -75,7 +75,7 @@ sequenceDiagram
     V->>R: GET code_email
     alt 验证码已存在（10 分钟内重复请求）
         R-->>V: 已有值
-        V-->>G: error=3 VERIFICATION_CODE_EXISTS
+        V-->>G: error=20001 VERIFY_CODE_EXISTS
     else 不存在
         R-->>V: null
         V->>R: SET code_email = 4 位验证码 + EXPIRE 600
@@ -99,22 +99,23 @@ sequenceDiagram
 - **SMTP 单连接**：不做连接池，避免脏连接；仅在 `ETIMEDOUT` 时关闭并重建 transport
 - **重试策略**：最多 5 次，初始 500ms 指数退避（500ms→1s→2s…）；`EENVELOPE` 等其他错误直接上抛不重试
 - **超时参数**：connectionTimeout 15s、greetingTimeout 10s、socketTimeout 30s
-- **Redis 异常**：ioredis error 事件中主动 quit；写验证码失败返回 REDIS_ERROR，不会出现"邮件发了但 Redis 没存"的成功响应
+- **Redis 异常**：ioredis error 事件中主动 quit；写验证码失败返回 VERIFY_REDIS_ERROR(20002)，不会出现"邮件发了但 Redis 没存"的成功响应
 - **防重复发信**：10 分钟内同一邮箱重复请求直接返回已存在错误，不再次发信
 - **优雅关闭**：SIGINT/SIGTERM 时关闭 SMTP 连接后 `process.exit(0)`
 
-## 错误码（本服务自有编号）
+## 错误码
 
-⚠️ 本服务错误编号是 **Node.js 侧独立定义**，GateServer 不做翻译、直接透传 `error` 字段，因此与 C++ `ErrorCodes` **含义并非一一对应**：
+本服务与 C++ 侧**共用同一套编号**（`common/include/chat/constants.h` 的 `ErrorCodes`，客户端副本见 `Client/inc/constants.h`）：`0` 复用通用 `SUCCESS`，其余收敛到 **本服务预留段 20001+**，不再与通用码（0~10）撞值。GateServer 原样透传 `error` 字段，不做翻译。
 
-| 值 | 名称 | 含义 | ⚠️ 与 C++ ErrorCodes 的同值差异 |
-|---|---|---|---|
-| 0 | SUCCESS | 验证码已生成并发送 | 一致 |
-| 1 | REDIS_ERROR | Redis 写入失败 | C++ 侧 1=ERROR_JSON，**含义不同** |
-| 2 | EXCEPTION | 发送过程异常 | C++ 侧 2=RPC_FAILED，**含义不同** |
-| 3 | VERIFICATION_CODE_EXISTS | 该邮箱 10 分钟内已有有效验证码 | C++ 侧 3=验证码过期，**含义不同** |
+| 值 | 枚举 | 含义 |
+|---|---|---|
+| 0 | SUCCESS | 验证码已生成并发送 |
+| 20001 | VERIFY_CODE_EXISTS | 该邮箱 10 分钟内已有有效验证码，不重发 |
+| 20002 | VERIFY_REDIS_ERROR | 验证码写入 Redis 失败 |
+| 20003 | VERIFY_MAIL_FAILED | 验证码邮件发送失败 |
 
-> **建议**：把两套错误码统一（例如给 VerifyServer 预留一段独立编号区间），避免客户端按同一套码表解析时误判。
+> 20001+ 专供本服务，C++ 通用码（0~10）不会占用该区间，客户端按同一张表解析即可准确区分。
+> ⚠️ 勿与注册/重置流程的 `VERIFYCODE_NOT_FOUND_OR_EXPIRED(3)`（GateServer 判定"验证码不存在/过期"）混淆——那是通用码，与这里的 20001 不是一回事。
 
 ## 安装与运行
 

@@ -47,7 +47,7 @@ cmake --build build -j$(nproc)
 - 业务服务只需 `target_link_libraries(<server> PRIVATE chat_common)`，外部依赖由 `common` 以 `PUBLIC` 传递。
 - 日志统一用 `LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR`（`common/include/chat/log.h`）；**禁止 `std::cout`/`std::cerr`/`printf`**；含 token/密码的请求禁止打印整个 body。
 - HTTP / TCP Handler 回包统一用 `Defer` 兜底；新增错误分支直接 `return`，不要漏发响应。
-- 错误码统一使用 `common/include/chat/constants.h` 的 `ErrorCodes`；Node.js `VerifyServer` 另有一套独立编号（见 `VerifyServer/README.md`）。
+- 错误码统一使用 `common/include/chat/constants.h` 的 `ErrorCodes`；Node.js `VerifyServer` 已收敛进同一张表，其特有码占用 `20001+` 预留段（见 `VerifyServer/README.md`）。
 - `proto` 唯一源文件是 `common/proto/message.proto`；生成物在 `build/common/grpc_gen/`，**不入库、勿手改**。
 
 ## 关键约束与易踩坑

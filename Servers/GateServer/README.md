@@ -39,7 +39,7 @@ flowchart TD
 
 > Redis 中验证码 key 为 `code_{email}`，由 VerifyServer 写入并带过期时间（600 秒）。
 >
-> ⚠️ **错误码体系不一致**：`/getVerifyCode` 的错误码由 VerifyServer 原样透传，编号是 Node.js 侧定义（0 成功 / 1 Redis 错误 / 2 异常 / **3 验证码已存在**），与本服务 C++ `ErrorCodes` **并非同一套**。客户端在该接口下收到 `error=3` 表示"10 分钟内已获取过验证码"，而非 C++ 侧的"验证码过期"。详见 [VerifyServer/README.md](../VerifyServer/README.md#错误码本服务自有编号)。
+> ℹ️ **错误码已收敛**：`/getVerifyCode` 的错误码由 VerifyServer 原样透传，已统一进 `common/include/chat/constants.h` 的 `ErrorCodes`——`0` 为成功，本服务特有码使用 **20001+ 预留段**（`20001` 验证码已存在 / `20002` Redis 写入失败 / `20003` 邮件发送失败），不再与通用码（0~10）撞值。注意 `20001` 表示"10 分钟内已获取过验证码"，与注册/重置流程的 `VERIFYCODE_NOT_FOUND_OR_EXPIRED(3)` 含义不同。详见 [VerifyServer/README.md](../VerifyServer/README.md#错误码)。
 
 ## 时序图：获取验证码 + 注册
 

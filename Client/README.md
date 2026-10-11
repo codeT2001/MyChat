@@ -182,7 +182,7 @@ sequenceDiagram
     A-->>R: SigRegisterResult
 ```
 
-> 验证码倒计时按钮为 `CountdownButton`；`/getVerifyCode` 的 `error=3` 表示"用户已存在"、`error=4` 视 VerifyServer 实现而定，以 `Servers/VerifyServer/README.md` 的错误码表为准。
+> 验证码倒计时按钮为 `CountdownButton`；`/getVerifyCode` 的错误码用 VerifyServer 预留段：`0` 成功、`20001` 10 分钟内已获取过验证码、`20002` Redis 写入失败、`20003` 邮件发送失败（见 `Servers/VerifyServer/README.md`）。注意 `VERIFYCODE_NOT_FOUND_OR_EXPIRED(3)` 是注册/重置时验证码不存在或过期，与 `20001` 无关。
 
 ### 4.3 找回密码（重置）
 

@@ -212,8 +212,11 @@ service ChatService {  // ChatServer 节点间
 | 8 | UID_INVALID | 用户不存在/资料拉取失败 |
 | 9 | TOKEN_INVALID | token 无效 |
 | 10 | USER_ALREADY_LOGIN | 保留值，现不使用（已改为顶号模式） |
+| 20001 | VERIFY_CODE_EXISTS | VerifyServer：该邮箱 10 分钟内已有有效验证码 |
+| 20002 | VERIFY_REDIS_ERROR | VerifyServer：验证码写入 Redis 失败 |
+| 20003 | VERIFY_MAIL_FAILED | VerifyServer：验证码邮件发送失败 |
 
-> ⚠️ VerifyServer（Node.js）用另一套独立错误码编号，与上表**并非一一对应**，详见 [VerifyServer/README.md](VerifyServer/README.md)。
+> `20001+` 为 **VerifyServer 预留段**：`/getVerifyCode` 的错误码由 VerifyServer（Node.js）产生，已收敛进本表并避开通用码（0~10）；GateServer 原样透传、不做翻译。详见 [VerifyServer/README.md](VerifyServer/README.md#错误码)。
 
 ### 一次完整登录
 

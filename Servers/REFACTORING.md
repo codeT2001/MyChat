@@ -53,7 +53,7 @@
 |---|---|
 | 单例仍是硬编码依赖 | `RedisManagerPool::GetInstance()` 直接调用，测试中无法替换；需抽象接口 + 依赖注入 |
 | 构造函数内做 IO | 单例构造即初始化连接池/配置，无法脱离真实 Redis/MySQL 实例化 |
-| 错误码会话未统一 | VerifyServer（Node.js）仍用另一套编号，与 C++ `ErrorCodes` 冲突 |
+| ~~错误码未统一~~ | ✅ 已收敛：VerifyServer（Node.js）特有码改用 `20001+` 预留段，与 C++ `ErrorCodes` 同表、不再撞值 |
 | 无测试 | 本次重构无任何自动化测试保护，仅手工回归验证 |
 
 ## 六、后续演进方向

@@ -76,6 +76,10 @@ enum class ErrorCodes {
     UID_INVALID = 8,
     TOKEN_INVALID = 9,
     USER_ALREADY_LOGIN = 10,   // 账号已在其他连接登录，拒绝重复登录
+    // ===== VerifyServer 预留段（20001+）：与上面的通用码隔离，GateServer 原样透传 =====
+    VERIFY_CODE_EXISTS = 20001, // 该邮箱 10 分钟内已有有效验证码，不重发
+    VERIFY_REDIS_ERROR = 20002, // 验证码写入 Redis 失败
+    VERIFY_MAIL_FAILED = 20003, // 验证码邮件发送失败
 };
 
 // for chatserver

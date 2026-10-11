@@ -12,6 +12,10 @@ enum class ErrorCodes {
     USER_EXIST,
     ERR_NETWORK,
     JSON_PARSE_ERROR = 5001,
+    // ===== VerifyServer 预留段（20001+）：与通用码隔离，与 Servers/VerifyServer/constants.js 保持一致 =====
+    VERIFY_CODE_EXISTS = 20001, // 该邮箱 10 分钟内已有有效验证码，不重发
+    VERIFY_REDIS_ERROR = 20002, // 验证码写入 Redis 失败
+    VERIFY_MAIL_FAILED = 20003, // 验证码邮件发送失败
 };
 
 enum class RequestId {

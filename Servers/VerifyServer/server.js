@@ -30,7 +30,7 @@ async function GetVerifyCode(call, callback) {
             }
             let bres = await redisModule.SetRedisExpire(constantsMdule.code_prefix + call.request.email, uniqueId, 600)
             if (!bres) {
-                callback(null, { email: call.request.email, error: constantsMdule.Errors.REDIS_ERROR })
+                callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_REDIS_ERROR })
                 return;
             }
             const expireAt = new Date(Date.now() + 10 * 60 * 1000)
@@ -54,14 +54,14 @@ async function GetVerifyCode(call, callback) {
             console.log('send res is ', res)
             callback(null, { email: call.request.email, error: constantsMdule.Errors.SUCCESS })
         } else {
-            callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFICATION_CODE_EXISTS })
+            callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_CODE_EXISTS })
         }
         console.log('uniqueId is ', uniqueId)
     } catch (err) {
         console.error(
             `[SMTP] ${new Date().toISOString()} ${err.code} ${err.command} ${err.message}`
         );
-        callback(null, { email: call.request.email, error: constantsMdule.Errors.EXCEPTION })
+        callback(null, { email: call.request.email, error: constantsMdule.Errors.VERIFY_MAIL_FAILED })
     }
 }
 
