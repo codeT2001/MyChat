@@ -2,9 +2,8 @@
 
 #include "chat_flow.h"
 
-#include <algorithm>
-#include <cctype>
-#include <chrono>
+#include <string>
+#include <vector>
 
 #include "chat/constants.h"
 #include "chat/log.h"
@@ -30,9 +29,6 @@ bool IsPeerLocal(const std::optional<std::string> &peerServer)
     return peerServer.has_value() &&
         *peerServer == ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
 }
-
-// uinfo_ 用户资料缓存的统一 TTL：防止资料变更后脏数据永久驻留
-constexpr auto USER_INFO_CACHE_TTL = std::chrono::seconds(3600);
 
 // Handler 公共骨架：解析请求体，并在作用域结束时按 rspId 统一回包。
 // 消除各 handler 里重复的「Json::Reader 解析 → 组装响应 JSON → Defer 回包」样板，
@@ -133,52 +129,15 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     // 注意：请求体含 token，禁止整体打印
     LOG_DEBUG("[LogicSystem] HandleLogin, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::CHAT_LOGIN_RSP, msg);
-    const Json::Value& src = ctx.Request();
-    Json::Value& retValue = ctx.Response();
-    auto uid = src["uid"].asInt();
-    auto token = src["token"].asString();
-
-    // 查询token是否正确
-    auto uid_str = std::to_string(uid);
-    auto tokenKey = USER_TOKEN_PREFIX + uid_str;
-    auto tokenValue = RedisManagerPool::GetInstance().Get(tokenKey);
-    if (!tokenValue.has_value()) {
-        retValue["error"] = (static_cast<int32_t>(ErrorCodes::UID_INVALID));
-        LOG_ERROR("[LogicSystem] login failed, token not found in redis, uid:%d", uid);
+    // 校验 token + 拉资料 + 组装申请/好友列表（纯逻辑，见 chat_flow.cpp）
+    const LoginResult login = ProcessLogin(ctx.Request(), deps_);
+    ctx.Response() = login.response;
+    if (!login.ok) {
         return;
     }
-    if (tokenValue != token) {
-        retValue["error"] = (static_cast<int32_t>(ErrorCodes::TOKEN_INVALID));
-        LOG_ERROR("[LogicSystem] login failed, token invalid, uid:%d", uid);
-        return;
-    }
-    auto baseKey = USER_INFO_PREFIX + uid_str;
-    std::shared_ptr<UserInfo> userInfo = std::make_shared<UserInfo>();
-    if (!GetBaseUserInfo(baseKey, uid, userInfo)) {
-        retValue["error"] = static_cast<uint32_t>(ErrorCodes::UID_INVALID);
-        LOG_ERROR("[LogicSystem] login failed, uid not found, uid:%d", uid);
-        return;
-    }
-    retValue["error"] = static_cast<uint32_t>(ErrorCodes::SUCCESS);
-    retValue["uid"] = uid;
-    retValue["sex"] = userInfo->sex;
-    retValue["name"] = userInfo->name;
-    retValue["email"] = userInfo->email;
-    retValue["nick"] = userInfo->nick;
-    retValue["desc"] = userInfo->desc;
-    retValue["icon"] = userInfo->icon;
-    retValue["token"] = token;
-    // 获取申请列表
-    std::vector<std::shared_ptr<ApplyInfo>> applyList;
-    if (MysqlManager::GetInstance().GetApplyList(uid, applyList, 0, 10)) {
-        AppendApplyList(retValue, applyList);
-    }
 
-    // 获取好友列表
-    std::vector<std::shared_ptr<UserInfo>> friendList;
-    MysqlManager::GetInstance().GetFriendList(uid, friendList);
-    AppendFriendList(retValue, friendList);
-
+    const int32_t uid = login.uid;
+    const std::string uid_str = std::to_string(uid);
     auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
     // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前），
     // 否则取到的都是新登录自己的状态
@@ -196,7 +155,7 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     if (oldServer.has_value() && !oldServer->empty()) {
         KickOldSession(uid, *oldServer, oldLocalSession);
     }
-    LOG_INFO("[LogicSystem] login success, uid:%d, name:%s", uid, userInfo->name.c_str());
+    LOG_INFO("[LogicSystem] login success, uid:%d, name:%s", uid, login.name.c_str());
 }
 
 void LogicSystem::KickOldSession(int32_t uid, const std::string& oldServer,
@@ -247,39 +206,8 @@ void LogicSystem::RegisterHandleCallback()
 
 bool LogicSystem::GetBaseUserInfo(const std::string baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo)
 {
-    // 先查Redis
-    auto infoValue = RedisManagerPool::GetInstance().Get(baseKey);
-    if (infoValue.has_value()) {
-        Json::Reader reader;
-        Json::Value root;
-        reader.parse(infoValue.value(), root);
-        userInfo->uid = root["uid"].asInt();
-        userInfo->sex = root["sex"].asInt();
-        userInfo->name = root["name"].asString();
-        userInfo->email = root["email"].asString();
-        userInfo->nick = root["nick"].asString();
-        userInfo->desc = root["desc"].asString();
-        userInfo->icon = root["icon"].asString();
-        LOG_INFO("[LogicSystem] GetBaseUserInfo from redis, uid:%d, name:%s", uid, userInfo->name.c_str());
-        return true;
-    }
-    auto info = MysqlManager::GetInstance().GetUserByUid(uid);
-    if (!info) {
-        return false;
-    }
-    userInfo = info;
-    Json::Value root;
-    root["uid"] = uid;
-    root["sex"] = info->sex;
-    root["name"] = info->name;
-    root["email"] = info->email;
-    root["nick"] = info->nick;
-    root["desc"] = info->desc;
-    root["icon"] = info->icon;
-    // 注意：缓存中不写 pwd——敏感数据不落 Redis；带 TTL，资料变更后最多 1 小时自愈
-    RedisManagerPool::GetInstance().SetEx(baseKey, root.toStyledString(), USER_INFO_CACHE_TTL);
-    LOG_INFO("[LogicSystem] GetBaseUserInfo from mysql, uid:%d, name:%s", uid, userInfo->name.c_str());
-    return true;
+    // Redis 缓存优先，未命中回落 MySQL 并写回缓存（实现见 chat_flow.cpp）
+    return LoadBaseUserInfo(baseKey, uid, userInfo, deps_);
 }
 
 // 支持uid查询

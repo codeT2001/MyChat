@@ -7,8 +7,10 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace P1 {
+struct ApplyInfo;
 struct UserInfo;
 
 // 基础设施接口层：把业务逻辑与具体实现（MySQL / Redis / gRPC）解耦，
@@ -24,6 +26,9 @@ public:
     virtual bool UpdatePassword(const std::string& email, const std::string& pwd) = 0;
     virtual bool CheckPassword(const std::string& name, const std::string& pwd, UserInfo& userInfo) = 0;
     virtual std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) = 0;
+    virtual bool GetApplyList(int32_t uid, std::vector<std::shared_ptr<ApplyInfo>>& list,
+        int begin, int limit) = 0;
+    virtual bool GetFriendList(int32_t uid, std::vector<std::shared_ptr<UserInfo>>& list) = 0;
 };
 
 // KV 存储（Redis 侧子集）

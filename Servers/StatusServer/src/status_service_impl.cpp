@@ -1,8 +1,5 @@
 #include "status_service_impl.h"
 
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
 #include <climits>
 #include <string>
 
@@ -10,14 +7,8 @@
 #include "chat/constants.h"
 #include "chat/log.h"
 #include "chat/redis_manager.h"
+#include "status_flow.h"
 namespace P1 {
-static thread_local boost::uuids::random_generator gen;
-std::string generate_unique_string()
-{
-    // 将UUID转换为字符串
-    std::string unique_string = boost::uuids::to_string(gen());
-    return unique_string;
-}
 
 Status StatusServiceImpl::GetChatServer(
     ServerContext* context, const GetChatServerReq* request, GetChatServerRsp* reply)
@@ -31,8 +22,8 @@ Status StatusServiceImpl::GetChatServer(
     reply->set_host(server.host);
     reply->set_port(server.port);
     reply->set_error(static_cast<int32_t>(ErrorCodes::SUCCESS));
-    reply->set_token(generate_unique_string());
-    InsertToken(request->uid(), reply->token());
+    reply->set_token(GenerateLoginToken());
+    StoreLoginToken(request->uid(), reply->token(), RedisManagerPool::GetInstance());
     return Status::OK;
 }
 
@@ -81,35 +72,15 @@ ChatServer StatusServiceImpl::GetChatServer()
 
 Status StatusServiceImpl::Login(ServerContext* context, const LoginReq* request, LoginRsp* reply)
 {
-    auto uid = request->uid();
-    auto& token = request->token();
-
-    std::string uid_str = std::to_string(uid);
-    std::string token_key = USER_TOKEN_PREFIX + uid_str;
-    auto token_value = RedisManagerPool::GetInstance().Get(token_key);
-    if (!token_value.has_value()) {
-        LOG_WARN("[StatusServer] Login failed, token not found, uid:%d", uid);
-        reply->set_error(static_cast<int32_t>(ErrorCodes::UID_INVALID));
-        return Status::OK;
+    // token 校验逻辑抽到 status_flow.cpp，便于单测
+    const StatusLoginResult result = ProcessStatusLogin(
+        request->uid(), request->token(), RedisManagerPool::GetInstance());
+    reply->set_error(result.error);
+    if (result.error == static_cast<int32_t>(ErrorCodes::SUCCESS)) {
+        reply->set_uid(result.uid);
+        reply->set_token(result.token);
     }
-    if (token_value.value() != token) {
-        LOG_WARN("[StatusServer] Login failed, token mismatch, uid:%d", uid);
-        reply->set_error(static_cast<int32_t>(ErrorCodes::TOKEN_INVALID));
-        return Status::OK;
-    }
-    reply->set_error(static_cast<int32_t>(ErrorCodes::SUCCESS));
-    reply->set_uid(uid);
-    reply->set_token(token);
     return Status::OK;
-}
-
-void StatusServiceImpl::InsertToken(int uid, std::string token)
-{
-    std::string uid_str = std::to_string(uid);
-    std::string token_key = USER_TOKEN_PREFIX + uid_str;
-    // 带 TTL：登录 token 只需存活到客户端完成 TCP 登录（秒级），
-    // 残留 token 靠 TTL 自然过期，同时避免断开清理误删新登录 token 的竞态
-    RedisManagerPool::GetInstance().SetEx(token_key, token, std::chrono::seconds(600));
 }
 
 void StatusServiceImpl::StartCacheRefresher(std::chrono::seconds interval)

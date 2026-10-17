@@ -29,7 +29,6 @@ public:
 	Status Login(ServerContext* context, const LoginReq* request,
 		LoginRsp* reply) override;
 private:
-	void InsertToken(int uid, std::string token);
 	void StartCacheRefresher(std::chrono::seconds interval);
 	void StopCacheRefresher();
     void RefreshCache();

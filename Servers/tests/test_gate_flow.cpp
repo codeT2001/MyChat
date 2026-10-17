@@ -84,6 +84,9 @@ public:
         return false;
     }
 
+    bool GetApplyList(int32_t, std::vector<std::shared_ptr<P1::ApplyInfo>>&, int, int) override { return false; }
+    bool GetFriendList(int32_t, std::vector<std::shared_ptr<UserInfo>>&) override { return false; }
+
     std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) override
     {
         for (const auto& u : users) {
