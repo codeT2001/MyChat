@@ -14,9 +14,10 @@
 - [四、核心链路](#四核心链路)
 - [五、技术栈与端口](#五技术栈与端口)
 - [六、快速开始](#六快速开始)
-- [七、文档索引](#七文档索引)
-- [八、已知限制](#八已知限制)
-- [九、许可](#九许可)
+- [七、测试与质量保障](#七测试与质量保障)
+- [八、文档索引](#八文档索引)
+- [九、已知限制](#九已知限制)
+- [十、许可](#十许可)
 
 ---
 
@@ -31,6 +32,7 @@
 | 好友申请 / 认证 | 同服直推、跨服 gRPC 转发 | ChatServer |
 | 实时文本消息 | 批量消息转发、已读状态 | ChatServer |
 | 在线会话管理 | 会话表 + Redis 路由/在线计数 | ChatServer + Redis |
+| 自动化回归测试 | 业务逻辑与 DB/Redis/gRPC 解耦，测试注入 fake；离线可跑 | `Servers/tests`（CTest）+ `Servers/VerifyServer/test`（Node） |
 
 ---
 
@@ -45,14 +47,24 @@ chat/
 │
 └── Servers/                    # 服务端集群（顶层 CMakeLists 在此）
     ├── common/                 #   公共静态库 libchat_common.a（协议/常量/日志/配置/连接池）
+    │   └── include/chat/       #     service_interfaces.h（基础设施接口层）
+    │                           #     session_registry.h（uid→会话表模板，可单测）
     ├── GateServer/             #   HTTP 网关（Boost.Beast :9090）
+    │                           #     src/http_params.*（URL/查询串解析）、src/gate_flow.*（纯业务函数）
     ├── ChatServer/             #   TCP 聊天节点（可多实例，含节点间 gRPC）
+    │                           #     src/chat_flow.*（纯业务函数）、src/msg_codec.*（TCP 帧头）
     ├── StatusServer/           #   gRPC 协调服务（节点分配 / token 颁发与校验）
+    │                           #     src/server_select.*、src/status_flow.*（纯函数）
     ├── VerifyServer/           #   Node.js 邮件验证码服务（gRPC）
+    │                           #     verify-code.js（纯逻辑）、test/（node --test 用例）
+    ├── tests/                  #   CTest 单元测试（零外部框架，注入 fake，默认启用）
     ├── start.sh / stop.sh / status.sh
     ├── logs/
-    ├── README.md / DEPLOY.md / REFACTORING.md
+    ├── README.md / DEPLOY.md / REFACTORING.md / AGENTS.md
     └── 各目录下均有 README.md
+
+> 服务端的分层约定：**Handler 只做解析与回包**，业务判定集中在各服务的 `*_flow` / 纯逻辑文件里，
+> 依赖以接口（`IUserStore` / `IKeyValueStore` / …）注入，因此单测不需要起 MySQL / Redis / gRPC。
 ```
 
 > ⚠️ **仓库根目录没有 `CMakeLists.txt`。** 服务端构建入口是 `Servers/`，客户端构建入口是 `Client/`，两者相互独立。
@@ -137,13 +149,14 @@ sequenceDiagram
     S-->>G: {host, port, token}
     G-->>C: token + 聊天节点地址
     C->>K: TCP 连接 + CHAT_LOGIN_REQ(token)
-    K->>S: gRPC Login(uid, token)
-    S->>R: 校验并删除 utoken_<uid>
-    S-->>K: 校验结果
-    K-->>C: CHAT_LOGIN_RSP
+    K->>R: GET utoken_<uid> 直接校验 token
+    K->>R: 写 userver_<uid> 路由 + login_count+1（并顶掉旧会话）
+    K-->>C: CHAT_LOGIN_RSP（资料 + 申请/好友列表）
 ```
 
-**要点**：token 一次性消费（校验后即删），避免重放；HTTP 阶段不建立长连接，TCP 阶段不再传密码。
+**要点**：HTTP 阶段不建立长连接，TCP 阶段不再传密码；token 由 StatusServer 颁发并带 **TTL 600 秒**，
+ChatServer 登录时直连 Redis 校验，**不删除**、靠 TTL 自然过期（重放窗口即 TTL）。
+`StatusService.Login` 这条 RPC 已实现且有单测，但当前链路未接入（ChatServer 走 Redis 直连）。
 
 ### 2. TCP 自定义帧
 
@@ -157,7 +170,7 @@ sequenceDiagram
 ```
 
 - `msgId` 取值见 `Servers/common/include/chat/constants.h` 的 `MSG_IDS`（10001 ~ 99999）。
-- 单帧 body **硬上限 2048 字节**（服务端 `MAX_MSG_LENGTH = 1024 * 2`，定义在 `Servers/ChatServer/src/csession.h`），超出直接断开。
+- 单帧 body **硬上限 2048 字节**（服务端 `MAX_MSG_LENGTH = 1024 * 2`，定义在 `Servers/ChatServer/src/msg_codec.h`），超出直接断开。
 - **每次发送前必须重置长度字节**：复用发送缓冲区时若忘记写回 `len`，会出现「首帧正常、后续帧被截断」的隐蔽 bug。
 
 ---
@@ -172,6 +185,7 @@ sequenceDiagram
 | StatusServer | C++17 / gRPC / Redis / MySQL | 50052 |
 | VerifyServer | Node.js / @grpc/grpc-js / ioredis / nodemailer | 50051 |
 | 存储 | Redis 6+ / MySQL 8+ | 6379 / 3306 |
+| 测试 | CTest（自建零依赖框架）+ Node 内置 `node --test` | — |
 
 **依赖版本要求**
 
@@ -243,7 +257,31 @@ ss -ltnp | grep -E '9090|50061|50062|50051|50052'
 
 ---
 
-## 七、文档索引
+## 七、测试与质量保障
+
+回归不依赖手工点界面：业务逻辑抽成纯函数 + 依赖注入，测试用内存 fake 顶替 MySQL / Redis / gRPC，
+**离线即可运行**（无需起任何服务）。
+
+```bash
+# 服务端 C++（CTest，零外部框架）
+cd Servers
+cmake -S . -B build -G Ninja
+cmake --build build -j1                      # ⚠️ 单线程编译
+ctest --test-dir build --output-on-failure
+
+# 验证码服务 Node.js（内置 test runner）
+cd VerifyServer && npm install && npm test
+```
+
+当前覆盖：**11 个 C++ 测试（103 个用例）+ 3 个 Node 测试文件**，包括注册/登录/改密/搜人/好友申请与认证/
+文本消息的判定分支、口令摘要与恒定时间比较、TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、
+HTTP 查询串解析、顶号会话表语义、跨语言错误码契约。清单见 [`Servers/README.md`](Servers/README.md#单元测试)。
+
+改动后的最低要求：`-j1` 编译通过 + `ctest` 全绿；测试用到的纯逻辑文件见 `Servers/AGENTS.md`。
+
+---
+
+## 八、文档索引
 
 | 文档 | 内容 |
 | --- | --- |
@@ -256,10 +294,12 @@ ss -ltnp | grep -E '9090|50061|50062|50051|50052'
 | [Servers/VerifyServer/README.md](Servers/VerifyServer/README.md) | Node.js 验证码服务 |
 | [Servers/DEPLOY.md](Servers/DEPLOY.md) | 环境准备、数据库初始化、启动、排错 |
 | [Servers/REFACTORING.md](Servers/REFACTORING.md) | 已完成的公共库抽取与分层重构记录 |
+| [Servers/AGENTS.md](Servers/AGENTS.md) | 服务端开发约定：构建/测试命令、分层与解耦规则 |
+| [doc/调优记录.md](doc/调优记录.md) | 逐轮调优与测试建设记录（含每轮发现并修复的缺陷） |
 
 ---
 
-## 八、已知限制
+## 九、已知限制
 
 以下问题在源码中真实存在，**使用前请知悉**（完整改进清单见项目改进建议文档）：
 
@@ -269,15 +309,17 @@ ss -ltnp | grep -E '9090|50061|50062|50051|50052'
 | 配置 | 各服务 `config.ini` 内明文写库账号密码 | 不可直接入库公网 |
 | 配置 | `Servers/StatusServer/config.ini` 里的 ChatServer 地址是公网 IP，本地部署需改成 `127.0.0.1` | 本地起不来连接 |
 | 安全 | `Servers/VerifyServer/config.json` 明文存放 QQ 邮箱授权码 | 泄露即被滥用，务必替换 |
-| 安全 | 密码以可逆方式存储，非 bcrypt/argon2 | 库泄露即密码泄露 |
-| 协议 | 单帧上限 2048 字节，长文本会被截断 | 不支持大消息 |
+| 安全 | `utoken_{uid}` 校验后不删除，600 秒 TTL 内可重放（一次性消费的 `StatusService.Login` 未接入链路） | 短暂泄露 token 即可重复建立 TCP 登录 |
+| 安全 | 口令为固定盐 SHA-256 摘要（`password_crypto`，非 bcrypt/argon2、无逐用户盐） | 抗暴力破解能力弱于专业 KDF，建议换 bcrypt/argon2 |
+| 协议 | 单帧上限 2048 字节，超限帧被**拒绝并断开连接**（不截断） | 不支持大消息，客户端需自行分批 |
 | 协议 | JSON 文本协议，体积大、无 schema 校验 | 带宽浪费、易错 |
-| 架构 | 大量 Meyers 单例 + 构造函数内做 IO | 难做单元测试、难替换实现 |
-| 架构 | Redis 键 `userver_` 无 TTL | 用户下线后路由残留 |
-| 工程 | 无自动化测试、无 CI | 回归全靠手测 |
+| 架构 | 业务判定已抽成纯函数 + 接口注入（可单测），但适配器仍是 Meyers 单例、构造期做 IO | 换实现（如换存储）仍要改单例绑定点，`*_flow` 之外的代码仍难单测 |
+| 架构 | Redis 路由键 `userver_` 无 TTL（靠断连时删除 + 下次登录覆盖自愈） | 进程被强杀时路由残留，直到该用户下次登录才被覆盖 |
+| 工程 | 纯 I/O 层（`mysql_dao` / `redis_manager` / socket 收发 / gRPC 客户端）无自动化测试 | 改动这些文件仍需手工回归 |
+| 工程 | 无 CI 流水线 | 测试需开发者本地手动触发（`ctest` / `npm test`） |
 
 ---
 
-## 九、许可
+## 十、许可
 
 本项目为学习 / 教学用途的 IM 实战项目。使用前请自行评估上述已知限制，生产环境需先完成安全加固。

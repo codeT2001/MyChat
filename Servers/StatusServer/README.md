@@ -54,12 +54,17 @@ sequenceDiagram
     else token 不一致
         S-->>CS: error=9 TOKEN_INVALID
     else 一致
-        S->>R: DEL utoken_uid（一次性消费，防重放）
         S-->>CS: error=0, uid, token
     end
 ```
 
-> **token 生命周期**：`GetChatServer` 时写入 `utoken_{uid}` → ChatServer 的 TCP 登录经 `Login` 校验后**删除**（一次性消费）→ 会话正常断开时 ChatServer 也会删除该键。
+> ⚠️ **现状**：当前 TCP 登录链路里 ChatServer 是**直连 Redis** 读 `utoken_{uid}` 校验的
+> （见 `ChatServer/src/chat_flow.cpp` 的 `ProcessLogin`），并未调用本 RPC；
+> 且校验后**不删除** token，靠 600 秒 TTL 自然过期（重放窗口 = TTL）。
+> 本 RPC 已实现且有单测（`tests/test_status_flow.cpp`），接入与否不影响现有链路。
+
+> **token 生命周期**：`GetChatServer` 时由 `StoreLoginToken` 写入 `utoken_{uid}`（TTL `LOGIN_TOKEN_TTL_SECONDS = 600`）
+> → ChatServer TCP 登录读该键校验 → 无人主动删除，到期自动失效。刷新失败（Redis 异常、节点表为空）时保留上一轮缓存。
 >
 > ⚠️ 若 ChatServer 进程异常退出未及清理，旧 token 会残留在 Redis 中（此时 GateServer 侧防重复登录也会受影响，需人工 `DEL`）。**建议给 `utoken_{uid}` 加 TTL**。
 
@@ -96,3 +101,17 @@ Port = 50062
 
 - 新增 ChatServer 节点：在 `config.ini` 的 `[ChatServers] Name=...` 登记并添加对应 section；同时在各 ChatServer 的 `[PeerServer]` / `[ChatServerN]` 补齐对端信息
 - 单线程编译验证：`cmake --build build --target statusServer -j1`
+
+---
+
+## 单元测试
+
+```bash
+cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(server_select|status_flow)' --output-on-failure
+```
+
+- `test_server_select`（7 用例）：`PickMinServer` 选最小在线数、缺计数按 `INT_MAX>>1`、空快照返回默认节点、计数按数值比较。
+- `test_status_flow`（8 用例）：token 生成（UUID 形态/唯一）、写入带 TTL、校验（缺失/不匹配/成功/按 uid 隔离/空 token 不放行）。
+
+> 选点与 token 逻辑都抽成了纯函数（`server_select.*` / `status_flow.*`），依赖通过 `IKeyValueStore` 注入，
+> 因此单测不需要起 Redis。

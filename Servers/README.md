@@ -174,6 +174,41 @@ cmake --build build -j$(nproc)
 
 ---
 
+## 单元测试
+
+不需要 MySQL / Redis / 网络即可运行（业务逻辑已与基础设施解耦，测试注入内存 fake）。
+
+```bash
+cd Servers
+cmake -S . -B build -G Ninja      # 默认启用测试；-DBUILD_TESTING=OFF 关闭
+cmake --build build -j1           # ⚠️ 单线程编译，避免内存/CPU 打满
+ctest --test-dir build --output-on-failure
+
+cd VerifyServer && npm install && npm test   # Node.js 侧，用内置 test runner
+```
+
+| 测试 | 被测模块 | 用例数 | 覆盖要点 |
+|---|---|---|---|
+| `test_password_crypto` | `common/src/password_crypto.cpp` | 6 | 口令摘要确定性/定长/雪崩、恒定时间比较 |
+| `test_msg_node` | `ChatServer/src/msg_node.cpp` | 4 | 裸缓冲构造 / 截断 / 读写 |
+| `test_protocol_constants` | `common/include/chat/constants.h` | 3 | `MSG_IDS` / `ErrorCodes` 数值契约 |
+| `test_config_manager` | `common/src/config_manager.cpp` | 2 | INI 解析与默认值回退 |
+| `test_gate_flow` | `GateServer/src/gate_flow.cpp` | 12 | 验证码 / 注册 / 重置 / 登录成功与失败分支 |
+| `test_chat_flow` | `ChatServer/src/chat_flow.cpp` | 39 | 搜人、资料加载（缓存+回落）、登录、加好友、认证、文本消息、跨节点通知 JSON |
+| `test_server_select` | `StatusServer/src/server_select.cpp` | 7 | 最小在线数选点、缺计数默认值 |
+| `test_status_flow` | `StatusServer/src/status_flow.cpp` | 8 | token 生成 / TTL 写入 / 校验 |
+| `test_msg_codec` | `ChatServer/src/msg_codec.cpp` | 7 | TCP 帧头大端字节序（与客户端 QDataStream 对齐） |
+| `test_http_params` | `GateServer/src/http_params.cpp` | 8 | URL 解码（含畸形转义）、查询串解析 |
+| `test_session_registry` | `common/include/chat/session_registry.h` | 7 | uid→会话绑定、顶号语义（旧会话不得删新绑定） |
+| `VerifyServer/test` | `verify-code.js` / `constants.js` / 配置模板 | 8 | 验证码逻辑、**错误码与 C++ 逐项同值**、配置模板自检 |
+
+合计 **11 个 C++ 测试（103 用例）+ 3 个 Node 测试文件**。
+
+> 尚未覆盖的是纯 I/O 层：`mysql_dao` / `redis_manager` / `csession` 收发 / gRPC 客户端，
+> 需要真实依赖或容器化环境。新增用例的方式见 [AGENTS.md](AGENTS.md#测试)。
+
+---
+
 ## 接口与协议
 
 ### HTTP 接口（GateServer :9090）

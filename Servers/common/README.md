@@ -58,6 +58,9 @@ graph TB
 | `include/chat/redis_manager.h` / `src/redis_manager.cpp` | Redis 连接池单例 |
 | `include/chat/mysql_dao.h` / `src/mysql_dao.cpp` | MySQL DAO 与内部连接池 |
 | `include/chat/mysql_manager.h` / `src/mysql_manager.cpp` | MySQL 管理器单例 `MysqlManager`（包装 `MysqlDao`） |
+| `include/chat/service_interfaces.h` | 基础设施接口层：`IUserStore` / `IKeyValueStore` / `IVerifyCodeService` / `IChatServerRouter`（业务与 DB/Redis/gRPC 解耦，单测注入 fake） |
+| `include/chat/session_registry.h` | `SessionRegistry<SessionPtr>`：uid → 会话指针的线程安全注册表模板（含顶号语义，有单测） |
+| `include/chat/password_crypto.h` / `src/password_crypto.cpp` | 口令摘要 `HashPassword`（固定盐 SHA-256）与恒定时间比较 `ConstantTimeEquals` |
 | `include/chat/rpc_stub_pool.h` | gRPC stub 连接池类模板（header-only） |
 | `include/chat/status_grpc_client.h` / `src/status_grpc_client.cpp` | StatusServer gRPC 客户端单例 |
 | `include/chat/verify_grpc_client.h` / `src/verify_grpc_client.cpp` | VerifyServer gRPC 客户端单例 |

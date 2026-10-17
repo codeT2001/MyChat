@@ -11,7 +11,7 @@
 - **登录二次校验**：GateServer 颁发的 token 在 TCP 建连后仍需经 StatusServer gRPC 校验
 - **好友系统**：搜索用户、申请、同意（action=1）/拒绝（action=2）；拒绝后对方重新申请自动复位为待处理
 - **文本聊天**：`text_array` 批量承载多条文本（每条带客户端生成的 msg_id），同服直接推 session，跨服走 `ChatService` gRPC
-- **统一回包与异常兜底**：各 Handler 用 `Defer` 保证任何分支都回包，单条消息异常不会杀死逻辑线程
+- **统一回包与异常兜底**：各 Handler 用 `HandlerContext`（RAII 骨架）保证任何分支都回包，单条消息异常不会杀死逻辑线程
 
 ## 架构组成
 
@@ -19,9 +19,12 @@
 |------|------|
 | CServer | TCP 服务器，accept 连接、管理 session 增删（`RemoveSession`，session 通过 `SetRemoveCallback` 反向通知） |
 | CSession | 客户端会话：异步读 6 字节包头 → 读 JSON 体 → 投队列；发送队列 + 异步写 |
+| MsgCodec | `msg_codec.*`：TCP 帧头编解码（大端）、body 长度上限校验（纯函数，有单测） |
 | MsgNode | 收包节点（含 msgId、当前长度、扩容逻辑） |
-| LogicSystem | 业务核心：注册 `handleFuncs_`（msgId → Handler），单线程消费队列 |
-| UserManager | 内存中 uid → shared_ptr\<CSession\> 映射（互斥保护） |
+| LogicSystem | 消息分发骨架：注册 `handleFuncs_`（msgId → Handler），单线程消费队列；Handler 只做解析与回包 |
+| ChatFlow | `chat_flow.*`：可单测的纯业务函数（搜人 / 资料加载 / 登录 / 加好友 / 认证 / 文本消息 / 跨节点通知 JSON） |
+| UserManager | 内存中 uid → shared_ptr\<CSession\> 映射，用 `common` 的 `SessionRegistry` 模板（互斥保护） |
+| ChatServiceImpl | gRPC 服务端：接收其他节点的通知，组装 JSON 的纯逻辑同样复用 `chat_flow` |
 | ChatGrpcClient | 按 `[PeerServer]` 配置为每个对端节点维护一个 gRPC stub 池（每池 5 条） |
 | ChatServiceImpl | gRPC 服务端：接收其他节点的 `NotifyAddFriend / NotifyFriendAccepted / NotifyTextChatMsg` |
 
@@ -44,14 +47,16 @@ flowchart TD
     RT -- 离线 --> OFF[不推送，靠登录拉列表兜底]
     RT -- 同服在线 --> LOC[UserManager 取 session 直接推送]
     RT -- 跨服 --> GRPC[ChatGrpcClient 调对端 ChatService]
-    EX --> R[Defer 统一 SendMessage 回请求方]
+    EX --> R[HandlerContext 统一 SendMessage 回请求方]
 ```
 
 ## 消息协议
 
 帧格式（**网络字节序 / 大端**，通过 `htons`/`ntohs`/`htonl`/`ntohl` 转换）：`2 字节 msgId + 4 字节 body 长度 + JSON body`。客户端 Qt 侧对应 `QDataStream::BigEndian`。
 
-> ⚠️ **单帧 body 硬上限 `MAX_MSG_LENGTH = 2048` 字节**（定义在 `csession.h`）。超限帧被直接拒绝并断开连接；客户端发送更长内容必须自行分批。
+> ⚠️ **单帧 body 硬上限 `MAX_MSG_LENGTH = 2048` 字节**（定义在 `msg_codec.h`，编解码在 `msg_codec.cpp`）。
+> 超限帧被直接拒绝并断开连接；客户端发送更长内容必须自行分批。
+> 帧头字节序有逐字节单测（`tests/test_msg_codec.cpp`）钉住，与客户端 `QDataStream` 大端一致。
 
 | 数值 | 名称 | 方向 | body 关键字段 |
 |---|---|---|---|
@@ -139,7 +144,7 @@ sequenceDiagram
     participant A as 客户端 A
 
     B->>SB: AUTH_FRIEND_REQ {from:A, to:B, action}
-    SB->>SB: Defer 注册 AUTH_FRIEND_RSP 回包
+    SB->>SB: HandlerContext 注册 AUTH_FRIEND_RSP 回包
     SB->>DB: AuthFriendApply(A,B, action==1?1:2)
     alt action=1 同意
         SB->>DB: AddFriend(A,B,remark)
@@ -183,7 +188,7 @@ sequenceDiagram
     participant B as 客户端 B
 
     A->>SA: TEXT_CHAT_MSG_REQ {from:A, to:B, text_array}
-    SA->>SA: Defer 注册 TEXT_CHAT_MSG_RSP 回包
+    SA->>SA: HandlerContext 注册 TEXT_CHAT_MSG_RSP 回包
     SA->>R: GET userver_B
     alt B 离线（无路由）
         Note over SA: 不推送，仅给 A 回成功
@@ -240,7 +245,21 @@ RPCPort = 50082
 ## 开发者注意
 
 - Handler 全跑在**同一逻辑线程**，禁止长时间阻塞；跨服 gRPC 为同步调用且**未设 deadline**（连接挂起会拖住整条业务队列）
-- 回包统一用 `Defer`，新增错误分支直接 `return`，不要漏发响应
+- 回包统一用 `HandlerContext`（构造解析请求、析构发送响应），新增错误分支直接 `return`，不要漏发响应
+- 新增业务判定先写进 `chat_flow.*` 的纯函数并补单测（见 `tests/test_chat_flow.cpp`），Handler 只保留路由与发送
 - 日志用 `LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR`，**禁止 `std::cout`**；含 token/密码的请求禁止打印整个 body
 - 帧长上限 2048 字节，新增协议字段注意别超
 - 单线程编译验证：`cmake --build build --target chatServer -j1`
+
+---
+
+## 单元测试
+
+```bash
+cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(chat_flow|msg_codec|session_registry|msg_node)' --output-on-failure
+```
+
+无关 MySQL / Redis / 网络：业务判定在 `chat_flow.*` 里以纯函数实现，依赖经 `ChatDependencies`
+（`IUserStore` / `IKeyValueStore`）注入，测试用内存 fake 顶替。当前覆盖搜人、资料加载（缓存优先 + 回填且不写 pwd）、
+登录、加好友申请、认证（含 action 非法/资料缺失/落库失败）、文本消息、跨节点通知 JSON、TCP 帧头字节序、
+uid→会话表（顶号）语义。

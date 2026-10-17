@@ -10,7 +10,9 @@ GateServer 是客户端访问系统的 **HTTP 网关**（Boost.Beast，默认 :9
 |---|---|
 | CServer | HTTP 服务器，Asio 线程池 accept |
 | HttpConnection | 单连接生命周期：读请求 → 交 LogicSystem 分发 → 写响应并关闭 |
-| LogicSystem | 维护 GET/POST 路由表，执行业务 Handler，`Defer` 统一回包 |
+| HttpParams | `http_params.*`：URL 解码与查询串解析（纯函数，有单测） |
+| LogicSystem | 维护 GET/POST 路由表，执行业务 Handler；`HttpJsonContext` 统一解析与回包 |
+| GateFlow | `gate_flow.*`：可单测的纯业务函数（验证码 / 注册 / 重置 / 登录），依赖经 `GateDependencies` 注入 |
 
 ## 内部处理流程
 
@@ -24,7 +26,7 @@ flowchart TD
     Chk -- 非法 --> Err[写 error 码]
     Chk -- 合法 --> Biz[业务处理 Redis / MySQL / gRPC]
     Biz --> Err
-    Err --> Resp[Defer 统一写 response body 并关闭连接]
+    Err --> Resp[HttpJsonContext 统一写 response body 并关闭连接]
     R404 --> Resp
 ```
 
@@ -154,7 +156,20 @@ sequenceDiagram
 
 ## 开发者注意
 
-- Handler 已全部用 `Defer` 兜底写响应，新增错误分支直接 `return`
+- Handler 已全部用 `HttpJsonContext` 兜底写响应，新增错误分支直接 `return`
+- 业务判定写在 `gate_flow.*` 的纯函数里，Handler 只做解析与回包；新增分支请同步补 `tests/test_gate_flow.cpp`
 - 请求体可能含密码，日志只打印 email/name，**禁止打印整个 body**
 - 无 TLS、无 CORS 头、无限流——生产建议前置 Nginx（终止 TLS、限流、CORS）
 - 单线程编译验证：`cmake --build build --target gateServer -j1`
+
+---
+
+## 单元测试
+
+```bash
+cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(gate_flow|http_params)' --output-on-failure
+```
+
+- `test_gate_flow`（12 用例）：注入内存 fake（`IUserStore` / `IKeyValueStore` / 验证码与 StatusServer 客户端），
+  覆盖验证码、注册、重置、登录的成功与各类失败分支（验证码错误/过期、重复注册、邮箱不匹配、改密失败、密码错误、RPC 失败）。
+- `test_http_params`（8 用例）：URL 解码（`+`/`%XX`/UTF-8/畸形转义）、查询串解析（空串、无 `=`、重复键、值含 `=`）。
