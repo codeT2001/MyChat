@@ -1,6 +1,7 @@
 #ifndef _P1_STATUS_GRPC_CLIENT_H_
 #define _P1_STATUS_GRPC_CLIENT_H_
 
+#include <cstdint>
 #include <grpcpp/grpcpp.h>
 #include "message.grpc.pb.h"
 #include "chat/noncopyable.h"
@@ -21,7 +22,10 @@ public:
 
 private:
     StatusGrpcClient();
+    void SetDeadline(grpc::ClientContext& context) const;
+
     std::unique_ptr<RpcStubPool<StatusService>> pool_;
+    int32_t deadlineMs_ = 500;
 };
 
 } // namespace P1

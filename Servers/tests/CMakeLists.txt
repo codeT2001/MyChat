@@ -15,6 +15,11 @@ set(REPO_SERVER_DIR ${CMAKE_SOURCE_DIR})
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(Threads REQUIRED)
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED)
+endif()
+find_package(gRPC CONFIG REQUIRED)
 find_library(JSONCPP_LIB NAMES jsoncpp libjsoncpp)
 
 # 组装一个测试可执行文件（test_main.cpp 提供 main）并注册到 CTest
@@ -124,3 +129,9 @@ chat_add_test(test_chat_event
     ${TEST_SRC_DIR}/test_chat_event.cpp
     ${REPO_SERVER_DIR}/ChatServer/src/chat_event.cpp)
 target_include_directories(test_chat_event PRIVATE ${REPO_SERVER_DIR}/ChatServer/src)
+
+# gRPC stub 池（RAII 归还 / 池耗尽超时 / 池先析构）
+chat_add_test(test_rpc_stub_pool
+    ${TEST_SRC_DIR}/test_rpc_stub_pool.cpp)
+target_include_directories(test_rpc_stub_pool PRIVATE ${REPO_SERVER_DIR}/common/include)
+target_link_libraries(test_rpc_stub_pool PRIVATE gRPC::grpc++ Threads::Threads)

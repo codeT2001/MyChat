@@ -63,6 +63,7 @@ private:
     std::unordered_map<std::string, PeerPool> pools_;
     mutable std::mutex poolMtx_;
     int32_t deadlineMs_ = 500;
+    RpcStubPool<ChatService>::Options poolOptions_;
 };
 
 } // namespace P1

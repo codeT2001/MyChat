@@ -55,5 +55,7 @@ MaxPendingPerWorker = 4096
 
 [RPC]
 DeadlineMs = 500
+PoolSize = 5
+AcquireTimeoutMs = 1000
 WorkerThreads = 2
 MaxPendingPerWorker = 4096

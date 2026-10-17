@@ -19,5 +19,11 @@ Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
 
+[RPC]
+# 调用 VerifyServer 的超时与 stub 池参数
+DeadlineMs = 500
+PoolSize = 5
+AcquireTimeoutMs = 1000
+
 # 节点列表从 Redis 注册表（chat:nodes / chat:node:{name}）自动发现，
 # 不再需要静态 [ChatServers] / [ChatServerN] 配置。

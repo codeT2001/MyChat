@@ -266,6 +266,8 @@ MaxPendingPerWorker = 4096 # 单 worker 队列上限；满队列时关闭对应�
 
 [RPC]
 DeadlineMs = 500
+PoolSize = 5
+AcquireTimeoutMs = 1000
 WorkerThreads = 2
 MaxPendingPerWorker = 4096
 ```

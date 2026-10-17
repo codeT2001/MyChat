@@ -417,6 +417,8 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 | `DedupTtlSeconds` | 600 | 消费幂等键 TTL |
 | `[Redis] BlockingSocketTimeoutMs` | 5000 | 阻塞读专用连接的 socket 超时 |
 | `[RPC] DeadlineMs` | 500 | gRPC 直连路径的超时 |
+| `[RPC] PoolSize` | 5 | 每个对端的 gRPC stub 池大小 |
+| `[RPC] AcquireTimeoutMs` | 1000 | 池耗尽时获取 stub 的最长等待时间，超时快速失败 |
 | `[RPC] WorkerThreads` | 2 | 派发 worker 数 |
 | `[RPC] MaxPendingPerWorker` | 4096 | 每个 worker 的队列上限，满队列丢弃并记日志 |
 | `[Business] WorkerThreads` | 4 | 业务 worker 数；同一 session 固定同一 worker |

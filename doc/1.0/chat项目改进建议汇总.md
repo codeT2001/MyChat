@@ -97,17 +97,19 @@
 - **影响**：一次慢调用卡住所有用户全部消息。
 - **建议**：① 阻塞 IO 移出消费线程；② 或多消费者线程按 uid 哈希分片；③ 缩小锁粒度。
 
-### 🔴 P1-2 gRPC stub 池 GetStub 无超时
+### ✅ P1-2 gRPC stub 池 GetStub 无超时（已修复）
 
 - **位置**：`Servers/common/include/chat/rpc_stub_pool.h:60`
 - **问题**：`cond_.wait` 无超时（对比 MySQL 池用 `wait_for(3s)`），池耗尽后所有线程永久阻塞。
 - **建议**：① 改 `wait_for` 带超时快速失败；② 给所有 RPC 设 deadline；③ 加池耗尽告警。
+- **已修复**：`GetStub()/PutStub()` 改为 `Acquire(timeout)` + RAII `Lease`，池耗尽按 `[RPC] AcquireTimeoutMs` 快速失败并告警；`GetStats()` 暴露 `waiting/timeouts/inUse`；channel 开启 keepalive 并把最大重连退避收紧到 5s。
 
-### 🟠 P1-3 gRPC 调用无 deadline
+### ✅ P1-3 gRPC 调用无 deadline（已修复）
 
 - **位置**：`Servers/ChatServer/src/chat_grpc_client.cpp`、`common/src/status_grpc_client.cpp`、`common/src/verify_grpc_client.cpp`
 - **问题**：跨服调用同步且无 deadline，网络抖动时长时间挂起。
 - **建议**：为每次 RPC 设置 1-3s deadline + 重试/快速失败。
+- **已修复**：`StatusGrpcClient` / `VerifyGrpcClient` 与 `ChatGrpcClient` 统一读取 `[RPC] DeadlineMs` 并设置 `ClientContext` deadline；直连失败时仅对 `UNAVAILABLE` 刷新对端地址缓存，`DEADLINE_EXCEEDED` 不再重建连接池。
 
 ### 🟠 P1-4 Redis 读操作无异常兜底
 

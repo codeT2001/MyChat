@@ -25,3 +25,9 @@ User = your_mysql_user
 Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
+
+[RPC]
+# 调用 StatusServer / VerifyServer 的超时与 stub 池参数
+DeadlineMs = 500
+PoolSize = 5
+AcquireTimeoutMs = 1000

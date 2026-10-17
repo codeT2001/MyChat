@@ -12,15 +12,33 @@ using grpc::ClientContext;
 using grpc::Status;
 using message::ChatMsgData;
 namespace {
-constexpr size_t DEFAULT_POOL_SIZE = 5;
 constexpr int32_t DEFAULT_RPC_DEADLINE_MS = 500;
+constexpr int32_t DEFAULT_RPC_ACQUIRE_TIMEOUT_MS = 1000;
 constexpr auto ENDPOINT_CACHE_TTL = std::chrono::seconds(5);
+
+bool IsConnectionFailure(const grpc::Status& status)
+{
+    // UNAVAILABLE 通常是节点重启/地址变化，立即让 GetPool 重新解析注册表；
+    // DEADLINE_EXCEEDED 只说明对端慢，重建 channel/池会放大故障，保留现有连接。
+    return status.error_code() == grpc::StatusCode::UNAVAILABLE;
+}
 } // namespace
 ChatGrpcClient::ChatGrpcClient()
 {
-    deadlineMs_ = ConfigManager::GetInstance().GetValue<int32_t>("RPC", "DeadlineMs", DEFAULT_RPC_DEADLINE_MS);
+    auto& cfg = ConfigManager::GetInstance();
+    deadlineMs_ = cfg.GetValue<int32_t>("RPC", "DeadlineMs", DEFAULT_RPC_DEADLINE_MS);
     deadlineMs_ = std::max(deadlineMs_, 1);
-    LOG_INFO("[ChatGrpcClient] initialized, deadline:%dms", deadlineMs_);
+
+    const int32_t configuredPoolSize = cfg.GetValue<int32_t>(
+        "RPC", "PoolSize", static_cast<int32_t>(RpcStubPool<ChatService>::kDefaultPoolSize));
+    const int32_t configuredAcquireTimeout = cfg.GetValue<int32_t>(
+        "RPC", "AcquireTimeoutMs", DEFAULT_RPC_ACQUIRE_TIMEOUT_MS);
+    poolOptions_.poolSize = static_cast<size_t>(std::max<int32_t>(configuredPoolSize, 1));
+    poolOptions_.acquireTimeout = std::chrono::milliseconds(std::max<int32_t>(configuredAcquireTimeout, 1));
+
+    LOG_INFO("[ChatGrpcClient] initialized, deadline:%dms, pool size:%zu, acquire timeout:%lldms",
+        deadlineMs_, poolOptions_.poolSize,
+        static_cast<long long>(poolOptions_.acquireTimeout.count()));
 }
 
 ChatGrpcClient::~ChatGrpcClient() = default;
@@ -64,7 +82,7 @@ std::shared_ptr<RpcStubPool<ChatService>> ChatGrpcClient::GetPool(const std::str
     }
 
     // 地址变化（节点重启换端口）时重建连接池；旧的 shared_ptr 由在途调用持有，不会悬空。
-    auto pool = std::make_shared<RpcStubPool<ChatService>>(DEFAULT_POOL_SIZE, endpoint->host, endpoint->port);
+    auto pool = std::make_shared<RpcStubPool<ChatService>>(poolOptions_, endpoint->host, endpoint->port);
     pools_[serverName] = PeerPool { endpointKey, now, pool };
     LOG_INFO("[ChatGrpcClient] resolved peer, server:%s, endpoint:%s", serverName.c_str(), endpointKey.c_str());
     return pool;
@@ -95,22 +113,22 @@ AddFriendRsp ChatGrpcClient::NotifyAddFriend(const std::string& serverName, cons
         return rsp;
     }
 
-    auto stub = pool->GetStub();
-    if (!stub) {
-        LOG_ERROR("[ChatGrpcClient] NotifyAddFriend failed, no available stub, server:%s", serverName.c_str());
-        Invalidate(serverName);
+    auto lease = pool->Acquire();
+    if (!lease) {
+        LOG_ERROR("[ChatGrpcClient] NotifyAddFriend failed, acquire stub timeout, server:%s", serverName.c_str());
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
         return rsp;
     }
     ClientContext context;
     SetDeadline(context);
-    Status status = stub->NotifyAddFriend(&context, req, &rsp);
-    pool->PutStub(std::move(stub));
+    Status status = lease->NotifyAddFriend(&context, req, &rsp);
 
     if (!status.ok()) {
         LOG_ERROR("[ChatGrpcClient] NotifyAddFriend rpc failed, server:%s, error:%s",
             serverName.c_str(), status.error_message().c_str());
-        Invalidate(serverName);
+        if (IsConnectionFailure(status)) {
+            Invalidate(serverName);
+        }
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
     }
     return rsp;
@@ -130,22 +148,22 @@ FriendAcceptedRsp ChatGrpcClient::NotifyFriendAccepted(const std::string& server
         return rsp;
     }
 
-    auto stub = pool->GetStub();
-    if (!stub) {
-        LOG_ERROR("[ChatGrpcClient] NotifyFriendAccepted failed, no available stub, server:%s", serverName.c_str());
-        Invalidate(serverName);
+    auto lease = pool->Acquire();
+    if (!lease) {
+        LOG_ERROR("[ChatGrpcClient] NotifyFriendAccepted failed, acquire stub timeout, server:%s", serverName.c_str());
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
         return rsp;
     }
     ClientContext context;
     SetDeadline(context);
-    Status status = stub->NotifyFriendAccepted(&context, req, &rsp);
-    pool->PutStub(std::move(stub));
+    Status status = lease->NotifyFriendAccepted(&context, req, &rsp);
 
     if (!status.ok()) {
         LOG_ERROR("[ChatGrpcClient] NotifyFriendAccepted rpc failed, server:%s, error:%s",
             serverName.c_str(), status.error_message().c_str());
-        Invalidate(serverName);
+        if (IsConnectionFailure(status)) {
+            Invalidate(serverName);
+        }
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
     }
     return rsp;
@@ -171,21 +189,21 @@ TextChatMsgRsp ChatGrpcClient::NotifyTextChatMsg(const std::string& serverName, 
         return rsp;
     }
 
-    auto stub = pool->GetStub();
-    if (!stub) {
-        LOG_ERROR("[ChatGrpcClient] NotifyTextChatMsg failed, no available stub, server:%s", serverName.c_str());
-        Invalidate(serverName);
+    auto lease = pool->Acquire();
+    if (!lease) {
+        LOG_ERROR("[ChatGrpcClient] NotifyTextChatMsg failed, acquire stub timeout, server:%s", serverName.c_str());
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
         return rsp;
     }
     ClientContext context;
     SetDeadline(context);
-    Status status = stub->NotifyTextChatMsg(&context, req, &rsp);
-    pool->PutStub(std::move(stub));
+    Status status = lease->NotifyTextChatMsg(&context, req, &rsp);
     if (!status.ok()) {
         LOG_ERROR("[ChatGrpcClient] NotifyTextChatMsg rpc failed, server:%s, error:%s",
             serverName.c_str(), status.error_message().c_str());
-        Invalidate(serverName);
+        if (IsConnectionFailure(status)) {
+            Invalidate(serverName);
+        }
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
     }
     return rsp;
@@ -204,22 +222,22 @@ KickUserRsp ChatGrpcClient::KickUser(const std::string& serverName, const KickUs
         return rsp;
     }
 
-    auto stub = pool->GetStub();
-    if (!stub) {
-        LOG_ERROR("[ChatGrpcClient] KickUser failed, no available stub, server:%s", serverName.c_str());
-        Invalidate(serverName);
+    auto lease = pool->Acquire();
+    if (!lease) {
+        LOG_ERROR("[ChatGrpcClient] KickUser failed, acquire stub timeout, server:%s", serverName.c_str());
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
         return rsp;
     }
     ClientContext context;
     SetDeadline(context);
-    Status status = stub->NotifyKickUser(&context, req, &rsp);
-    pool->PutStub(std::move(stub));
+    Status status = lease->NotifyKickUser(&context, req, &rsp);
 
     if (!status.ok()) {
         LOG_ERROR("[ChatGrpcClient] KickUser rpc failed, server:%s, error:%s",
             serverName.c_str(), status.error_message().c_str());
-        Invalidate(serverName);
+        if (IsConnectionFailure(status)) {
+            Invalidate(serverName);
+        }
         rsp.set_error(static_cast<int32_t>(ErrorCodes::RPC_FAILED));
     }
     return rsp;

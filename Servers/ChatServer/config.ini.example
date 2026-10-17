@@ -71,6 +71,9 @@ MaxPendingPerWorker = 4096
 [RPC]
 # 跨节点同步 gRPC 的超时；超时后调用失败并刷新节点地址缓存
 DeadlineMs = 500
+# 每个对端的 gRPC stub 池大小；池耗尽后最多等待 AcquireTimeoutMs 再快速失败
+PoolSize = 5
+AcquireTimeoutMs = 1000
 # 跨节点 RPC 派发线程数（同一目标节点固定落到同一线程，保证顺序）
 WorkerThreads = 2
 # 每个派发线程的待处理队列上限，满队列丢弃并记录错误日志

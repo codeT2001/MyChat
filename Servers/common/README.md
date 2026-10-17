@@ -158,8 +158,11 @@ C++ 服务间及服务端与客户端共享的整数契约，完整表见 [../RE
 
 ### gRPC stub 池（rpc_stub_pool）
 
-- 类模板 `RpcStubPool<ServiceType>`，每池默认 5 个 stub
-- `GetStub()` 在 `stop_` / `initFailed_` / 非空谓词上等待，初始化失败或池关闭时返回 nullptr，调用方必须判空；`PutStub()` 归还
+- 类模板 `RpcStubPool<ServiceType>`，同一 channel 上预建默认 5 个 stub；stub 本身可并发复用，池用于限制同时在途 RPC 数
+- `Acquire(timeout)` 返回 move-only 的 RAII `Lease`，析构自动归还，异常或提前 `return` 不会漏 stub；池耗尽时按超时快速失败并输出 WARN，不再无限阻塞
+- `GetStats()` 提供 `created` / `available` / `inUse` / `waiting` / `acquisitions` / `timeouts`，便于观测池耗尽
+- channel 默认开启 keepalive（30s ping / 10s 超时），最大重连退避从 gRPC 默认 120s 收紧到 5s
+- 池大小与获取超时由 `[RPC] PoolSize`、`[RPC] AcquireTimeoutMs` 配置；StatusServer / VerifyServer 调用同样带 `[RPC] DeadlineMs`
 - `status_grpc_client`（默认 127.0.0.1:50052）与 `verify_grpc_client`（默认 127.0.0.1:50051）均为单例
 
 ## 构建
