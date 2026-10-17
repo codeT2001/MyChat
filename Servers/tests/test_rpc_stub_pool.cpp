@@ -23,6 +23,15 @@ struct FakeService {
     }
 };
 
+struct BrokenService {
+    class Stub { };
+
+    static std::unique_ptr<Stub> NewStub(const std::shared_ptr<grpc::ChannelInterface>&)
+    {
+        return nullptr;
+    }
+};
+
 using FakePool = P1::RpcStubPool<FakeService>;
 
 FakePool::Options MakeOptions(size_t poolSize, int64_t timeoutMs)
@@ -30,7 +39,6 @@ FakePool::Options MakeOptions(size_t poolSize, int64_t timeoutMs)
     FakePool::Options options;
     options.poolSize = poolSize;
     options.acquireTimeout = std::chrono::milliseconds(timeoutMs);
-    options.keepalive = false;
     return options;
 }
 
@@ -44,7 +52,7 @@ TESTFW_TEST(RpcStubPool_AcquireUntilExhausted)
     CHECK(static_cast<bool>(second));
 
     auto stats = pool.GetStats();
-    CHECK_EQ(stats.created, static_cast<size_t>(2));
+    CHECK(stats.valid);
     CHECK_EQ(stats.available, static_cast<size_t>(0));
     CHECK_EQ(stats.inUse, static_cast<size_t>(2));
 
@@ -52,7 +60,7 @@ TESTFW_TEST(RpcStubPool_AcquireUntilExhausted)
     CHECK(!static_cast<bool>(third));
 
     stats = pool.GetStats();
-    CHECK_EQ(stats.created, static_cast<size_t>(2));
+    CHECK_EQ(stats.inUse, static_cast<size_t>(2));
     CHECK_EQ(stats.timeouts, static_cast<uint64_t>(1));
 }
 
@@ -94,14 +102,42 @@ TESTFW_TEST(RpcStubPool_WaitingAcquireGetsReturnedStub)
     CHECK(acquired.load());
 }
 
-TESTFW_TEST(RpcStubPool_LeaseOutlivesPool)
+TESTFW_TEST(RpcStubPool_InvalidPoolDoesNotCountAsTimeout)
 {
-    auto pool = std::make_unique<FakePool>(MakeOptions(1, 10), "127.0.0.1", "1");
+    P1::RpcStubPool<BrokenService>::Options options;
+    options.poolSize = 2;
+    options.acquireTimeout = std::chrono::milliseconds(10);
+    P1::RpcStubPool<BrokenService> pool(options, "127.0.0.1", "1");
+
+    auto lease = pool.Acquire();
+    CHECK(!static_cast<bool>(lease));
+
+    const auto stats = pool.GetStats();
+    CHECK(!stats.valid);
+    CHECK_EQ(stats.available, static_cast<size_t>(0));
+    CHECK_EQ(stats.timeouts, static_cast<uint64_t>(0));
+}
+
+TESTFW_TEST(RpcStubPool_DestroyWaitsForLeaseReturn)
+{
+    auto pool = std::make_unique<FakePool>(MakeOptions(1, 1000), "127.0.0.1", "1");
     auto lease = pool->Acquire();
     CHECK(static_cast<bool>(lease));
 
+    std::thread releaser([&lease]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        lease.Reset();
+    });
+
+    const auto begin = std::chrono::steady_clock::now();
     pool.reset();
-    lease.Reset();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - begin).count();
+    releaser.join();
+
+    CHECK(elapsed >= 100);
+    // Lease 已在 150ms 左右归还，析构不应一直等到 5s 超时
+    CHECK(elapsed < 4000);
 }
 
 } // namespace
