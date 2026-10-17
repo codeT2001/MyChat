@@ -73,3 +73,59 @@ client_add_test(test_usermanager
 # 资源登记：rc.qrc 与 images/、style/ 目录一一对应（新增资源忘记登记会失败）
 client_add_test(test_qrc_assets
     ${CMAKE_CURRENT_SOURCE_DIR}/test_qrc_assets.cpp)
+
+# 界面交互：用 QTest 派发鼠标/键盘事件（等价于手工点界面），offscreen 平台运行。
+# 只编译登录框及其依赖链（AuthService 单例在构造期建立信号连接，不会发请求），
+# 不触发真实网络：用例只走到「校验/提示/页面切换/错误回显」这些本地分支。
+client_add_test(test_ui_widgets
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_widgets.cpp
+    ${CLIENT_INC_DIR}/logindialog.h
+    ${CLIENT_INC_DIR}/authservice.h
+    ${CLIENT_INC_DIR}/httpmanager.h
+    ${CLIENT_INC_DIR}/tcpmanager.h
+    ${CLIENT_INC_DIR}/usermanager.h
+    ${CLIENT_INC_DIR}/utils.h
+    ${CLIENT_INC_DIR}/countdownbutton.h
+    ${CLIENT_INC_DIR}/statefulclicklabel.h
+    ${CLIENT_INC_DIR}/messagetextedit.h
+    ${CLIENT_SRC_DIR}/logindialog.cpp
+    ${CLIENT_SRC_DIR}/authservice.cpp
+    ${CLIENT_SRC_DIR}/httpmanager.cpp
+    ${CLIENT_SRC_DIR}/tcpmanager.cpp
+    ${CLIENT_SRC_DIR}/msgcodec.cpp
+    ${CLIENT_SRC_DIR}/usermanager.cpp
+    ${CLIENT_SRC_DIR}/domainmodels.cpp
+    ${CLIENT_SRC_DIR}/jsoncodec.cpp
+    ${CLIENT_SRC_DIR}/utils.cpp
+    ${CLIENT_SRC_DIR}/countdownbutton.cpp
+    ${CLIENT_SRC_DIR}/statefulclicklabel.cpp
+    ${CLIENT_SRC_DIR}/messagetextedit.cpp
+    ${CMAKE_SOURCE_DIR}/ui/logindialog.ui
+    ${CMAKE_SOURCE_DIR}/rc.qrc)
+target_link_libraries(test_ui_widgets PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Network)
+# 无显示器/无 X11 也能跑：Qt 离屏平台插件
+set_tests_properties(test_ui_widgets PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# 主面板交互：侧边栏切页 / 搜索覆盖页 / 点击会话进入聊天页。
+# 主面板会拉起几乎全部 UI 组件（会话列表、聊天页、通讯录、资料页……），
+# 这里直接复用 Client/src 下的实现（排除 main.cpp / mainwindow.cpp），避免维护第二份依赖清单。
+file(GLOB PANEL_TEST_SOURCES CONFIGURE_DEPENDS ${CLIENT_SRC_DIR}/*.cpp)
+list(REMOVE_ITEM PANEL_TEST_SOURCES
+    ${CLIENT_SRC_DIR}/main.cpp
+    ${CLIENT_SRC_DIR}/mainwindow.cpp)
+file(GLOB PANEL_TEST_UIS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/ui/*.ui)
+file(GLOB PANEL_TEST_HEADERS CONFIGURE_DEPENDS ${CLIENT_INC_DIR}/*.h)
+list(REMOVE_ITEM PANEL_TEST_HEADERS ${CLIENT_INC_DIR}/mainwindow.h) # 其 .cpp 未纳入，避免 moc 引用未定义符号
+
+client_add_test(test_mainpanel
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_mainpanel.cpp
+    ${PANEL_TEST_HEADERS}
+    ${PANEL_TEST_SOURCES}
+    ${PANEL_TEST_UIS}
+    ${CMAKE_SOURCE_DIR}/rc.qrc)
+target_link_libraries(test_mainpanel PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Network)
+set_tests_properties(test_mainpanel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

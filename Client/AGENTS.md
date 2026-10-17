@@ -38,11 +38,14 @@ ctest --test-dir build --output-on-failure
 
 客户端已有 CTest + Qt Test 单元测试（`tests/`，默认随构建启用，`-DBUILD_TESTING=OFF` 关闭）：
 
-- 只测纯逻辑（JSON/帧编解码、工具函数、`UserManager`、跨项目协议契约、`rc.qrc` 资源登记），不建网络与界面；
+- 纯逻辑测试（JSON/帧编解码、工具函数、`UserManager`、跨项目协议契约、`rc.qrc` 资源登记）不建网络与界面；
+- 另有离屏界面测试（`test_ui_widgets` / `test_mainpanel`）：用 QTest 派发真实鼠标/键盘事件，覆盖登录框校验、
+  密码可见性、倒计时、回车发送、主面板切页/搜索/进入会话；用 `QT_QPA_PLATFORM=offscreen` 运行，无需显示器；
+- 新增界面用例时优先用 `findChild<T*>("对象名")` 定位 `.ui` 里的控件，并断言信号/可见页面/提示文案，不要只调私有函数；
 - 新增/重命名被测的纯逻辑源文件时，同步维护 `tests/CMakeLists.txt`；
 - 失败详情看 `build/tests/reports/<测试名>.txt`（部分终端抓不到 Qt Test stdout）；
 - 协议常量、消息号、`HttpPaths` 改动会先被 `test_protocol_contract` 拦住——客户端与服务端必须同值；
-- UI / 网络链路仍靠手工回归：登录、注册、找回密码、搜索加好友、收发消息，并确认日志中没有 `LOG_ERROR`。
+- 真实网络链路仍靠手工回归：登录 → 注册 → 找回密码 → 搜索加好友 → 收发消息，并确认日志中没有 `LOG_ERROR`。
 
 提交前至少保证一次干净的全量构建 + `ctest` 全绿。
 

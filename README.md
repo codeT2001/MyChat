@@ -280,12 +280,13 @@ ctest --test-dir build --output-on-failure
 cd VerifyServer && npm install && npm test
 ```
 
-当前覆盖：**服务端 11 个 C++ 测试（103 个用例）+ 客户端 6 个测试（45 个用例）+ 3 个 Node 测试文件**。
+当前覆盖：**服务端 11 个 C++ 测试（103 个用例）+ 客户端 8 个测试（59 个用例）+ 3 个 Node 测试文件**。
 服务端覆盖注册/登录/改密/搜人/好友申请与认证/文本消息的判定分支、口令摘要与恒定时间比较、
 TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询串解析、顶号会话表语义；
 客户端覆盖「客户端常量 ↔ 服务端权威定义」的协议契约（消息号/错误码/action/HTTP 路径/头像数量）、
 帧编解码与帧长上限、JSON 请求序列化与回包解析、表单校验与服务器地址、`UserManager` 分页与备注、
-`rc.qrc` 资源登记；Node 侧覆盖验证码与跨语言错误码契约。
+`rc.qrc` 资源登记，以及离屏点击级的界面交互（登录框校验/密码可见性/跳转信号、倒计时按钮、回车发送、
+主面板切页/搜索/进入会话）；Node 侧覆盖验证码与跨语言错误码契约。
 清单见 [`Servers/README.md`](Servers/README.md#单元测试) 与 [`Client/README.md`](Client/README.md#单元测试)。
 
 改动后的最低要求：服务端 `-j1` 编译通过 + `ctest` 全绿，客户端 `cmake --build build` 通过 + `ctest` 全绿；
