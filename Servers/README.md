@@ -253,7 +253,7 @@ service ChatService {  // ChatServer 节点间
 |---|---|---|
 | 数据库账号密码明文 | 各 `config.ini` 的 `[MySQL]` | 改用环境变量或密文注入，配置不入库 |
 | 邮箱 SMTP 授权码明文 | `VerifyServer/config.json` | 立即轮换，改用环境变量注入 |
-| 密码存明文 | GateServer + MySQL | 改用 bcrypt / argon2 加盐哈希 |
+| 密码存储 | GateServer + MySQL | 已改为固定盐 SHA-256 摘要入库（见 common/include/chat/password_crypto.h），响应体不含 pwd，比对走 `ConstantTimeEquals`（`CRYPTO_memcmp`）恒定时间比较；建议后续升级为 bcrypt / argon2id + 逐用户随机盐 |
 | 无 gRPC 鉴权 | 各服务间 gRPC | 内网部署 + mTLS，或加服务间 token |
 | 无 TLS | GateServer HTTP | 前置 Nginx 终止 TLS |
 

@@ -52,7 +52,7 @@
   2. **清理 git 历史**：安装 `git-filter-repo`（`pip install git-filter-repo`）后重写历史并强推，协作方需重新 clone；
   3. 各部署机首次部署执行 `cp .env.example .env`（脚本用）、按需 `cp config.ini.example config.ini` / `cp config.json.example config.json` 并填入真实值。
 
-### 🔴 P0-2 密码明文存储与传输
+### 🟠 P0-2 密码明文存储与传输（服务端已做简易摘要，待升级 bcrypt）
 
 - **位置**：`Servers/common/src/mysql_dao.cpp:411`（CheckPassword）、`:375`（UpdatePassword）、`GateServer/src/logic_system.cpp:123`
 - **问题**：`WHERE name=? AND pwd=?` 直接比明文；注册/改密写明文；登录成功还把 pwd 回传客户端。

@@ -16,6 +16,7 @@
 #include "chat/config_manager.h"
 #include "chat/constants.h"
 #include "chat/log.h"
+#include "chat/password_crypto.h"
 namespace P1 {
 namespace {
 constexpr uint64_t CONNECTION_IDLE_THRESHOLD = 600; // 10 minutes in seconds
@@ -318,7 +319,8 @@ int MysqlDao::RegUserTransaction(
             pstmt_insert->setInt(1, newId);
             pstmt_insert->setString(2, name);
             pstmt_insert->setString(3, email);
-            pstmt_insert->setString(4, pwd);
+            // 存口令摘要而非明文（P0-2）
+            pstmt_insert->setString(4, HashPassword(pwd));
             pstmt_insert->setString(5, icon);
             pstmt_insert->executeUpdate();
         }
@@ -384,7 +386,8 @@ bool MysqlDao::UpdatePassword(const std::string& email, const std::string& pwd)
     try {
         std::unique_ptr<sql::PreparedStatement> pstmt(
             conn->conn_->prepareStatement("UPDATE user SET pwd = ? WHERE email = ?"));
-        pstmt->setString(1, pwd);
+        // 存口令摘要而非明文（P0-2）
+        pstmt->setString(1, HashPassword(pwd));
         pstmt->setString(2, email);
         int updateCount = pstmt->executeUpdate();
         LOG_DEBUG("[MysqlDao] UpdatePassword, email:%s, updated rows:%d", email.c_str(), updateCount);
@@ -407,24 +410,34 @@ bool MysqlDao::CheckPassword(const std::string& name, const std::string& pwd, Us
     Defer defer([this, &conn] { pool_->Release(std::move(conn)); });
 
     try {
-        // 登录校验只需身份字段，列收窄避免拉取整行
+        // 取出口令摘要后在进程内做恒定时间比较（P0-2）：
+        // 不再用 SQL 的 pwd = ? 比较——DB 的字符串比较非恒定时间，且不在我方代码内
         std::unique_ptr<sql::PreparedStatement> pstmt(
-            conn->conn_->prepareStatement("SELECT uid, email FROM user WHERE name = ? AND pwd = ?"));
+            conn->conn_->prepareStatement("SELECT uid, email, pwd FROM user WHERE name = ?"));
         pstmt->setString(1, name);
-        pstmt->setString(2, pwd);
 
         std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
 
+        std::string storedHash;
+        std::string email;
+        int uid = 0;
         bool found = false;
         if (res->next()) {
-            userInfo.name = name;
-            userInfo.email = res->getString("email");
-            userInfo.uid = res->getInt("uid");
+            storedHash = res->getString("pwd");
+            email = res->getString("email");
+            uid = res->getInt("uid");
             found = true;
         }
         res->close(); // 关键：显式关闭
 
-        return found;
+        // 用户不存在与口令错误一律返回 false，避免用户名枚举差异
+        if (!found || !ConstantTimeEquals(storedHash, HashPassword(pwd))) {
+            return false;
+        }
+        userInfo.name = name;
+        userInfo.email = email;
+        userInfo.uid = uid;
+        return true;
 
     } catch (sql::SQLException& e) {
         LogSqlError(__func__, e);
@@ -496,7 +509,6 @@ std::shared_ptr<UserInfo> MysqlDao::GetUserByName(const std::string& name)
             userInfo->uid = res->getInt("uid");
             userInfo->sex = res->getInt("sex");
             userInfo->name = res->getString("name");
-            userInfo->pwd = res->getString("pwd");
             userInfo->email = res->getString("email");
             userInfo->nick = res->getString("nick");
             userInfo->desc = res->getString("desc");

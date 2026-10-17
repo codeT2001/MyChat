@@ -77,12 +77,14 @@ CREATE TABLE `user` (
     uid   INT NOT NULL PRIMARY KEY,
     name  VARCHAR(64)  NOT NULL UNIQUE,
     email VARCHAR(128) NOT NULL UNIQUE,
-    pwd   VARCHAR(64)  NOT NULL,
+    pwd   VARCHAR(64)  NOT NULL,  -- 存 SHA-256 摘要（64 位十六进制），非明文
     icon  VARCHAR(255) DEFAULT '',
     nick  VARCHAR(64)  DEFAULT '',
     sex   TINYINT      DEFAULT 0,
     `desc` VARCHAR(255) DEFAULT ''
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+--    ⚠️ pwd 列自本版本起存 SHA-256 摘要：升级前已存在的明文密码行不会被自动迁移，
+--       需用户重新注册/改密（或按新算法回填，见 common/include/chat/password_crypto.h）。
 
 -- ③ 好友申请（status: 0 待处理 / 1 同意 / 2 拒绝）
 CREATE TABLE friend_apply (
