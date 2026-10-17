@@ -57,3 +57,18 @@ target_include_directories(test_gate_flow PRIVATE
     ${REPO_SERVER_DIR}/common/include
     ${REPO_SERVER_DIR}/GateServer/src)
 target_link_libraries(test_gate_flow PRIVATE ${JSONCPP_LIB})
+
+# ChatServer 业务逻辑（纯函数 + 接口依赖；测试注入 fake，不碰 DB/Redis）
+chat_add_test(test_chat_flow
+    ${TEST_SRC_DIR}/test_chat_flow.cpp
+    ${REPO_SERVER_DIR}/ChatServer/src/chat_flow.cpp)
+target_include_directories(test_chat_flow PRIVATE
+    ${REPO_SERVER_DIR}/common/include
+    ${REPO_SERVER_DIR}/ChatServer/src)
+target_link_libraries(test_chat_flow PRIVATE ${JSONCPP_LIB})
+
+# StatusServer 选点逻辑（纯函数，仅依赖头文件）
+chat_add_test(test_server_select
+    ${TEST_SRC_DIR}/test_server_select.cpp
+    ${REPO_SERVER_DIR}/StatusServer/src/server_select.cpp)
+target_include_directories(test_server_select PRIVATE ${REPO_SERVER_DIR}/StatusServer/src)

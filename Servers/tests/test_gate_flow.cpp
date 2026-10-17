@@ -83,6 +83,20 @@ public:
         }
         return false;
     }
+
+    std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) override
+    {
+        for (const auto& u : users) {
+            if (static_cast<uint32_t>(u.uid) == uid) {
+                auto info = std::make_shared<UserInfo>();
+                info->uid = u.uid;
+                info->name = u.name;
+                info->email = u.email;
+                return info;
+            }
+        }
+        return nullptr;
+    }
 };
 
 class FakeKvStore : public P1::IKeyValueStore {

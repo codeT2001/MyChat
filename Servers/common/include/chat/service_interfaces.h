@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -22,6 +23,7 @@ public:
     virtual bool CheckEmail(const std::string& name, const std::string& email) = 0;
     virtual bool UpdatePassword(const std::string& email, const std::string& pwd) = 0;
     virtual bool CheckPassword(const std::string& name, const std::string& pwd, UserInfo& userInfo) = 0;
+    virtual std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) = 0;
 };
 
 // KV 存储（Redis 侧子集）

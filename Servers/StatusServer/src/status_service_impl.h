@@ -7,6 +7,7 @@
 #include <shared_mutex>
 #include <unordered_map>
 #include <thread>
+#include "server_select.h"
 namespace P1 {
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -18,29 +19,6 @@ using message::LoginReq;
 using message::LoginRsp;
 using message::StatusService;
 
-class  ChatServer {
-public:
-	ChatServer():host(""),port(""),name(""),con_count(0){}
-	ChatServer(const ChatServer& cs):host(cs.host), port(cs.port), name(cs.name), con_count(cs.con_count){}
-	ChatServer& operator=(const ChatServer& cs) {
-		if (&cs == this) {
-			return *this;
-		}
-
-		host = cs.host;
-		name = cs.name;
-		port = cs.port;
-		con_count = cs.con_count;
-		return *this;
-	}
-	bool operator<(const ChatServer& cs) const {
-		return con_count < cs.con_count;
-	}
-	std::string host;
-	std::string port;
-	std::string name;
-	int32_t con_count;
-};
 class StatusServiceImpl final : public StatusService::Service
 {
 public:

@@ -1,5 +1,7 @@
 #include "logic_system.h"
 
+#include "chat_flow.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -32,37 +34,6 @@ bool IsPeerLocal(const std::optional<std::string> &peerServer)
 // uinfo_ 用户资料缓存的统一 TTL：防止资料变更后脏数据永久驻留
 constexpr auto USER_INFO_CACHE_TTL = std::chrono::seconds(3600);
 
-// 登录响应里申请/好友列表的字段很多是共用的，统一序列化，供 HandleLogin 使用
-void AppendApplyList(Json::Value &dst, const std::vector<std::shared_ptr<ApplyInfo>> &list)
-{
-    for (const auto &apply : list) {
-        Json::Value obj;
-        obj["name"] = apply->name;
-        obj["uid"] = apply->uid;
-        obj["icon"] = apply->icon;
-        obj["nick"] = apply->nick;
-        obj["sex"] = apply->sex;
-        obj["desc"] = apply->desc;
-        obj["status"] = apply->status;
-        dst["apply_list"].append(obj);
-    }
-}
-
-void AppendFriendList(Json::Value &dst, const std::vector<std::shared_ptr<UserInfo>> &list)
-{
-    for (const auto &f : list) {
-        Json::Value obj;
-        obj["name"] = f->name;
-        obj["uid"] = f->uid;
-        obj["icon"] = f->icon;
-        obj["nick"] = f->nick;
-        obj["sex"] = f->sex;
-        obj["desc"] = f->desc;
-        obj["back"] = f->back;
-        dst["friend_list"].append(obj);
-    }
-}
-
 // Handler 公共骨架：解析请求体，并在作用域结束时按 rspId 统一回包。
 // 消除各 handler 里重复的「Json::Reader 解析 → 组装响应 JSON → Defer 回包」样板，
 // 同时保证每条分支 return 都会回包（与原 Defer 行为一致）。
@@ -92,6 +63,9 @@ private:
 } // namespace
 LogicSystem::LogicSystem() : stop_(false)
 {
+    // 绑定生产实现（当前仅搜索用户流程使用，后续逐步迁移到 ChatDependencies）
+    deps_.user_store = &MysqlManager::GetInstance();
+    deps_.kv_store = &RedisManagerPool::GetInstance();
     RegisterHandleCallback();
     worker_ = std::thread(&LogicSystem::DealMessage, this);
 }
@@ -313,40 +287,7 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
 {
     LOG_DEBUG("[LogicSystem] HandleSearchUser, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::SEARCH_USER_RSP, msg);
-    const Json::Value& src = ctx.Request();
-    Json::Value& rtValue = ctx.Response();
-    auto uidStr = src["uid"].asString();
-
-    // uid 必须为纯数字，避免 stoi 抛异常导致无法回复客户端
-    if (uidStr.empty() || !std::all_of(uidStr.begin(), uidStr.end(), [](unsigned char c) { return std::isdigit(c); })) {
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-        LOG_WARN("[LogicSystem] HandleSearchUser failed, invalid uid:%s", uidStr.c_str());
-        return;
-    }
-    auto key = USER_INFO_PREFIX + uidStr;
-    auto infoStr = RedisManagerPool::GetInstance().Get(key);
-    if (infoStr.has_value()) {
-        Json::Reader reader;
-        reader.parse(infoStr.value(), rtValue);
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-        LOG_DEBUG("[LogicSystem] HandleSearchUser from redis, uid:%s", uidStr.c_str());
-        return;
-    }
-    int32_t uid = std::stoi(uidStr);
-    auto info = MysqlManager::GetInstance().GetUserByUid(uid);
-    if(!info) {
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-        LOG_WARN("[LogicSystem] HandleSearchUser failed, uid:%s not found", uidStr.c_str());
-        return;
-    }
-    rtValue["uid"] = uid;
-    rtValue["sex"] = info->sex;
-    rtValue["name"] = info->name;
-    rtValue["email"] = info->email;
-    rtValue["nick"] = info->nick;
-    rtValue["desc"] = info->desc;
-    rtValue["icon"] = info->icon;
-    LOG_INFO("[LogicSystem] HandleSearchUser ok, uid:%d, name:%s", uid, info->name.c_str());
+    ctx.Response() = ProcessSearchUser(ctx.Request(), deps_);
 }
 
 // from_uid ----> to_uid  apply_info name

@@ -12,6 +12,7 @@
 #include "chat/constants.h"
 #include "csession.h"
 #include "chat/noncopyable.h"
+#include "chat_flow.h"
 
 namespace P1 {
 using tcp = boost::asio::ip::tcp;
@@ -26,6 +27,9 @@ public:
 
     ~LogicSystem();
     void PostMsgToQue(std::shared_ptr<LogicNode> node);
+
+    // 注入业务依赖（生产默认绑定真实实现；单测可替换为 fake）
+    void SetDependencies(const ChatDependencies& deps) { deps_ = deps; }
 
 private:
     void DealMessage();
@@ -51,6 +55,7 @@ private:
     std::thread worker_;
     bool stop_;
     std::unordered_map<MSG_IDS, handleFunc> handleFuncs_;
+    ChatDependencies deps_;
 };
 } // namespace P1
 

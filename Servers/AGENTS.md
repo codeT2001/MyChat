@@ -56,8 +56,14 @@ ctest --test-dir build --output-on-failure
 
 业务逻辑与基础设施解耦：接口在 `common/include/chat/service_interfaces.h`
 （`IUserStore` / `IKeyValueStore` / `IVerifyCodeService` / `IChatServerRouter`），`MysqlManager` /
-`RedisManagerPool` 直接实现对应接口；`GateServer/src/gate_flow.{h,cpp}` 承载只依赖接口的纯业务函数，
-测试用 fake 注入（见 `tests/test_gate_flow.cpp`）。
+`RedisManagerPool` 直接实现对应接口。只依赖接口的纯业务函数集中在各服务的 `*_flow` / 纯逻辑文件中，
+测试用 fake 注入：
+
+- `GateServer/src/gate_flow.{h,cpp}`（见 `tests/test_gate_flow.cpp`）
+- `ChatServer/src/chat_flow.{h,cpp}`（见 `tests/test_chat_flow.cpp`）
+- `StatusServer/src/server_select.{h,cpp}`（见 `tests/test_server_select.cpp`）
+
+新增业务逻辑优先写成「纯函数 + 接口依赖」放进上述文件，Handler 只做解析与回包，便于直接补单测。
 
 ## 代码约定
 

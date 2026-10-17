@@ -35,8 +35,8 @@ struct UserInfo {
 struct ApplyInfo {
 	ApplyInfo(int uid, std::string name, std::string desc,
 		std::string icon, std::string nick, int _sex, int status)
-		:uid(uid),name(name),desc(desc),
-		icon(icon),nick(nick),sex(sex),status(status){}
+		:uid(uid),sex(_sex),status(status),name(name),
+		desc(desc),icon(icon),nick(nick){}
 	int uid;
     int sex;
 	int status;

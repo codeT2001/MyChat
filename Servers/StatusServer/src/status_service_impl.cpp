@@ -166,17 +166,7 @@ void StatusServiceImpl::RefreshCache()
         LOG_WARN("[StatusServer] no chat server configured, keep previous cache");
         return;
     }
-    ChatServer minServer;
-    minServer.con_count = INT_MAX;
-    for (auto& [name, server] : snapshot) {
-        auto it = count_map.find(server.name);
-        server.con_count = (it != count_map.end())
-            ? std::stoi(it->second)
-            : (INT_MAX >> 1);
-        if(server < minServer) {
-            minServer = server;
-        }
-    }
+    const ChatServer minServer = PickMinServer(snapshot, count_map);
     
     // ✅ Step 4: 写锁替换整个缓存（写锁持有时间极短）
     {
