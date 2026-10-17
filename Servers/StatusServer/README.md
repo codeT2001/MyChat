@@ -7,7 +7,7 @@
 - **GetChatServer**：按各 ChatServer 的在线连接数（Redis Hash `login_count`）选出负载最低的节点，返回其 host/port，并生成 UUID token 写入 Redis（`utoken_{uid}`）
 - **Login**：校验 uid + token 是否有效（由 ChatServer 的 TCP 登录流程调用）
 
-节点列表优先来自 Redis 注册表（`chat:nodes` / `chat:node:{name}`，由 ChatServer 启动时写入并心跳续期），注册表为空时回落到 `config.ini` 的 `[ChatServers]`；后台线程每 1 秒刷新一次最小负载节点缓存，RPC 请求只做短时间持锁的内存读取，不被 Redis IO 阻塞。
+节点列表只来自 Redis 注册表（`chat:nodes` / `chat:node:{name}`，由 ChatServer 启动时写入并心跳续期）；后台线程每 1 秒刷新一次最小负载节点缓存，RPC 请求只做短时间持锁的内存读取，不被 Redis IO 阻塞。
 
 ## gRPC 接口
 
@@ -80,29 +80,14 @@ sequenceDiagram
 [StatusServer]
 Host = 127.0.0.1
 Port = 50052
-
-[ChatServers]
-# 可选兜底：Redis 注册表不可用时才使用静态节点表；
-# ChatServer 配置好 PublicHost 后可以整段删除。
-Name = ChatServer1,ChatServer2
-
-[ChatServer1]
-Name = ChatServer1
-Host = 127.0.0.1                    # 迁移期可覆盖注册表里的 PublicHost
-Port = 50061
-
-[ChatServer2]
-Name = ChatServer2
-Host = 127.0.0.1
-Port = 50062
 ```
 
-> ⚠️ 这里的 `Host` 是**下发到客户端的连接地址**，必须是客户端能访问到的地址（本地调试 `127.0.0.1`、内网用内网 IP、公网用公网 IP/域名）。填错的表现是：HTTP 登录成功但客户端 TCP 连不上聊天节点。
+节点列表只来自 Redis 注册表，不再需要 `[ChatServers]` / `[ChatServerN]`。下发到客户端的地址取自 ChatServer 注册的 `PublicHost:tcpPort`，因此必须在 ChatServer 的 `[SelfServer]` 中填写客户端可达的 `PublicHost`。
 
 ## 开发者注意
 
-- 新增 ChatServer 节点：启动时自动注册到 Redis，StatusServer 自动发现；无需修改其他 ChatServer 配置。若注册表不可用，再在 `[ChatServers]` 手工兜底。
-- 迁移期：注册表节点存在、且 `[ChatServerN] Host` 非空时，StatusServer 会优先使用旧配置的 Host 作为下发地址，避免 `SelfServer.Host` 只是监听地址时客户端连错。
+- 新增 ChatServer 节点：启动时自动注册到 Redis，StatusServer 自动发现；无需修改 StatusServer 或其他 ChatServer 配置。
+- 注册表不可用时 StatusServer 保留上一轮节点缓存；进程首次启动时若注册表为空，会返回 `RPC_FAILED`，待 ChatServer 注册并完成下一轮刷新后恢复。
 - 单线程编译验证：`cmake --build build --target statusServer -j1`
 
 ---

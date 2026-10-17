@@ -200,7 +200,7 @@ cd <repo>/Servers && ./stop.sh
 1. **凭据与配置**：真实配置不入库——首次部署将各 `config.ini.example` / `config2.ini.example` / `config.json.example` 复制为去掉 `.example` 的文件并填入本机明文值；`Servers/.env`（`cp .env.example .env`）仅供脚本使用，缺失不影响服务启动。
 2. **启动顺序**：务必让 StatusServer 最后启动。
 3. **防火墙**：对外开放 **9090**、**50061**、**50062**；其余端口仅本机访问。
-4. **客户端连接**：需能访问服务器公网 IP；在 ChatServer 的 `[SelfServer] PublicHost` 填写客户端可达地址。迁移期也可继续用 StatusServer `config.ini` 的 `[ChatServerN] Host` 覆盖。
+4. **客户端连接**：需能访问服务器公网 IP；在 ChatServer 的 `[SelfServer] PublicHost` 填写客户端可达地址。StatusServer 直接从节点注册表读取该地址，不再需要静态 `[ChatServerN]` 覆盖。
 5. **重启后检查**：确认 Redis 中无残留 `userver_{uid}` / `utoken_{uid}` 键影响再次登录；`chat:nodes` 中不应残留已下线节点（异常退出最长 30 秒由 TTL 清理）。
 6. **Stream 运维**：跨服事件默认保留 1 天、每条流最多约 10 万条；节点停机超过 `StreamKeyTtlSeconds` 或事件超过 `StreamMaxEventAgeSeconds` 会被丢弃。普通运维只观察 `lag/pending`，不要随意删除 `chat:push:*`（会丢失未消费事件）。
 7. **凭据安全**：`.env`、真实 `config.ini`、`VerifyServer/config.json` 均已被 `.gitignore` 忽略；历史提交中的旧凭据视为已泄露，需轮换并用 `git filter-repo` 清理。

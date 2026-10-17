@@ -27,19 +27,13 @@ ChatGrpcClient::~ChatGrpcClient() = default;
 
 std::optional<ChatGrpcClient::PeerEndpoint> ChatGrpcClient::ResolveEndpoint(const std::string& serverName) const
 {
-    // 1) 首选 Redis 注册表：新增节点不再需要改任何 ChatServer 配置。
+    // 只从 Redis 节点注册表解析对端地址。静态 [ChatServerN] 兼容已移除，
+    // 需要 gRPC 直连时使用 NotifyTransport=grpc，但仍由注册表提供地址。
     auto node = ResolveChatNode(serverName);
     if (node.has_value() && !node->rpcHost.empty() && !node->rpcPort.empty()) {
         return PeerEndpoint { node->rpcHost, node->rpcPort };
     }
-
-    // 2) 灰度兼容：旧配置里的 [ChatServerN] Host/RPCPort。
-    auto& cfg = ConfigManager::GetInstance();
-    auto host = cfg.GetValue<std::string>(serverName, "Host", "");
-    auto port = cfg.GetValue<std::string>(serverName, "RPCPort", "");
-    if (!host.empty() && !port.empty()) {
-        return PeerEndpoint { host, port };
-    }
+    LOG_WARN("[ChatGrpcClient] peer not registered, server:%s", serverName.c_str());
     return std::nullopt;
 }
 

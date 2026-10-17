@@ -54,7 +54,7 @@ private:
     };
 
     ChatGrpcClient();
-    // 先查 Redis 节点注册表，找不到时回落到旧的 [ChatServerN] 配置，便于灰度迁移。
+    // 只从 Redis 节点注册表解析对端；不再读取静态 [ChatServerN] 配置。
     std::optional<PeerEndpoint> ResolveEndpoint(const std::string& serverName) const;
     std::shared_ptr<RpcStubPool<ChatService>> GetPool(const std::string& serverName);
     void Invalidate(const std::string& serverName);

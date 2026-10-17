@@ -92,7 +92,7 @@ cd VerifyServer && npm install && npm test   # node --test "test/*.test.js"
 - **业务串行**：ChatServer 所有 Handler 跑在同一逻辑线程，禁止长时间阻塞；跨节点通知统一经 `ChatMessageRouter` 投递到 `RpcDispatcher` 的固定 worker，不要在 Handler 里直接做 `XADD` 或 gRPC 调用。
 - **跨节点传输**：`[Cluster] NotifyTransport=stream`（默认）时写目标节点 `chat:push:{node}` Stream，consumer group 名与节点名一致；`grpc` 仅用于灰度/回滚，调用带 `[RPC] DeadlineMs`。两种模式都保持 fire-and-forget，客户端 ACK 由本地 Handler 立即返回。
 - **Stream 可靠性**：消费成功后才 `XACK`；失败保留 pending，由 `XPENDING/XCLAIM` 重试，超过 `StreamMaxDeliveryAttempts` 写入 `chat:dead:{node}`；`chat:dedup:{node}:{id}` 去重，过期事件按 `StreamMaxEventAgeSeconds` 丢弃。至少一次语义，业务需按 `msg_id` 幂等。
-- **节点发现**：ChatServer 启动时向 Redis 注册 `chat:node:{name}`（带 TTL）并加入 `chat:nodes`；跨服对端地址优先从注册表解析，旧的 `[PeerServer]` / `[ChatServerN]` 仅作灰度兜底。
+- **节点发现**：ChatServer 启动时向 Redis 注册 `chat:node:{name}`（带 TTL）并加入 `chat:nodes`；跨服对端地址只从注册表解析，已移除 `[PeerServer]` / `[ChatServerN]` 静态配置。`NotifyTransport=grpc` 是显式直连模式，同样使用注册表地址。
 - **必须存在 `user_id` 发号器表**，否则注册事务（`LAST_INSERT_ID(id+1)`）失败。
 - **Redis 键无 TTL**：`utoken_{uid}` / `userver_{uid}` 在进程异常退出时会残留，靠下次登录顶号流程覆盖自愈。
 - 顶号模式：重复登录不拒绝，由 ChatServer 踢掉旧会话（同节点 `NOTIFY_KICK`，跨节点 `ChatService.NotifyKickUser`）。

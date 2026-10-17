@@ -52,7 +52,7 @@ bool DecodeChatNodeInfo(const std::string& payload, ChatNodeInfo& info)
         !ReadRequiredString(root, "tcpPort", parsed.tcpPort)) {
         return false;
     }
-    // publicHost 可选：缺省时回落到 rpcHost，兼容旧版注册信息。
+    // publicHost 可选：缺省时回落到 rpcHost，适用于只配置监听地址的部署。
     if (!ReadRequiredString(root, "publicHost", parsed.publicHost)) {
         parsed.publicHost = parsed.rpcHost;
     }

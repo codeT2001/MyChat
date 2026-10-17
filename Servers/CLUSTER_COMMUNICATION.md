@@ -84,10 +84,10 @@ sequenceDiagram
 Phase 1 已经完成以下改进，但仍保留 gRPC 数据面：
 
 - Redis 节点注册表 `chat:nodes` / `chat:node:{name}`，节点启动注册、退出注销、10 秒心跳续期。
-- `ChatGrpcClient` 优先从注册表解析对端地址，旧 `[ChatServerN]` 配置仅作兜底。
+- `ChatGrpcClient` 从注册表解析对端地址；后续 `develop` 分支已移除旧 `[ChatServerN]` 静态配置兜底。
 - gRPC 调用统一设置 `[RPC] DeadlineMs`，避免无限等待。
 - `RpcDispatcher` 把同步 gRPC 从 LogicSystem 单业务线程移到固定 worker，同一目标节点固定同一 worker。
-- StatusServer 优先从注册表发现节点，配置中的 `[ChatServers]` 仅作 Redis 故障兜底。
+- StatusServer 从注册表发现节点；`develop` 分支已移除 `[ChatServers]` / `[ChatServerN]` 静态节点表。
 
 Phase 1 解决的是“地址从哪来、调用在哪里执行、超时多久”，但没有解决“目标节点重启期间事件放哪、失败如何重试、如何观察积压”。Phase 2 用 Redis Stream 补上这部分。
 
@@ -168,7 +168,7 @@ flowchart TB
 | `ChatEventConsumer` | `ChatServer/chat_event_consumer` | 建 consumer group、`XREADGROUP`、处理、`XACK`、回收 pending、写死信 |
 | `ChatNotifier` | `ChatServer/chat_notifier` | 查本机 `UserManager` 会话并组装 JSON 推送；Stream 与 gRPC 共用 |
 | `ChatServiceImpl` | `ChatServer/chat_service_impl` | gRPC 服务端，调用 `ChatNotifier` 落地通知 |
-| `ChatGrpcClient` | `ChatServer/chat_grpc_client` | gRPC 回滚路径；优先从 Redis 注册表解析对端，旧配置兜底 |
+| `ChatGrpcClient` | `ChatServer/chat_grpc_client` | gRPC 直连/回滚路径；只从 Redis 注册表解析对端地址 |
 | `RpcDispatcher` | `ChatServer/rpc_dispatcher` | 固定 key 落到固定 worker，异步执行 `XADD` 或 gRPC；避免阻塞 LogicSystem |
 
 ### 3.3 事件格式
@@ -252,6 +252,36 @@ stateDiagram-v2
 - **重复投递**：系统是至少一次语义。`XACK` 前崩溃、reclaim 重放、去重键写入前崩溃都可能产生重复；客户端或业务侧应按 `msg_id` 做幂等。
 - **不保证在线送达**：目标用户不在线时事件被正常消费并 ACK，相当于“丢弃离线通知”；这与改造前“用户不在线就不推送”的业务语义一致。
 
+### 3.7 新版本中的 gRPC 直连模式
+
+如果某个 ChatServer 确实需要绕过 Stream、直接调用目标节点，仍然可以使用 gRPC，但不需要恢复旧版静态配置：
+
+```ini
+[Cluster]
+NotifyTransport = grpc
+```
+
+调用链如下：
+
+```mermaid
+sequenceDiagram
+    participant SA as ChatServer A
+    participant R as Redis 注册表
+    participant SB as ChatServer B
+
+    SA->>R: GET chat:node:ChatServerB
+    R-->>SA: {rpcHost, rpcPort, publicHost, tcpPort}
+    SA->>SB: gRPC ChatService（rpcHost:rpcPort，带 DeadlineMs）
+    SB-->>SA: gRPC 响应
+```
+
+要点：
+
+- 目标节点名仍来自 `userver_{uid}`，地址来自 `chat:node:{name}`，不需要 `[ChatServerN]`。
+- 多网卡或 NAT 环境下，由目标节点配置 `[SelfServer] RpcHost` 为**调用方可达**的地址；`PublicHost` 只用于下发给客户端。
+- 外部业务服务也可以直接调用 ChatServer 的 `ChatService`，地址为 `RpcHost:RPCPort`；当前没有 gRPC 鉴权，只应部署在内网或可信网络。
+- 直连模式不经过 Stream 缓冲，目标节点重启期间的通知仍可能丢失；它适合低延迟场景或 Stream 故障时的应急回滚。
+
 ## 4. 改动前后对比
 
 | 维度 | 改动前（静态对端 + 同步 gRPC） | 改动后（Redis Stream 数据面） |
@@ -269,7 +299,7 @@ stateDiagram-v2
 | 运维观测 | 主要看调用方日志 | `XLEN` / `XINFO GROUPS` / `XPENDING` / 死信流 |
 | 外部依赖 | Redis（路由/注册）+ 对端 gRPC | Redis 成为跨节点通知的强依赖；gRPC 仅回滚 |
 | 扩缩容 | 新节点需要通知所有节点改配置（早期） | 新节点自行注册即可；旧节点无需改配置 |
-| 滚动升级 | gRPC 协议兼容即可 | 新旧版本需同时理解 Stream，否则先切 `grpc` 灰度 |
+| 滚动升级 | gRPC 协议兼容即可 | 全量新版本；若必须混跑，统一切 `grpc` 且旧节点需能注册 Redis |
 
 ## 5. 优缺点
 
@@ -326,9 +356,11 @@ NotifyTransport = stream   # 默认；改为 grpc 即回滚到直连 gRPC
 1. 先升级全部 ChatServer 到包含 `ChatEventConsumer` 的版本，但保持 `NotifyTransport=grpc`。
 2. 确认每个节点的 `chat:push:{name}` consumer group 已建立：`XINFO GROUPS chat:push:{name}`。
 3. 逐节点切换 `NotifyTransport=stream` 并重启，观察 `lag`、`pending` 与业务日志。
-4. 全部节点切换完成后，可移除旧的 `[ChatServerN]` 对端配置；`[ChatServers]` 仅保留给 StatusServer 做 Redis 故障兜底。
+4. 全部节点切换完成后，可删除旧的 `[ChatServerN]` 对端配置；StatusServer 也不再读取 `[ChatServers]` 静态节点表。
 
 ### 7.3 混合版本兼容
+
+> `develop` 分支已移除静态对端配置。下面的兼容性仅针对仍会向 Redis 注册节点的 Phase 1 版本；最初版本（不注册 Redis、仅靠静态配置）不再支持与新节点混跑。
 
 - **旧节点 → 新节点**：旧节点只会发 gRPC，新节点仍保留 `ChatService`，兼容。
 - **新节点 → 旧节点（Stream 模式）**：旧节点没有 Stream 消费者，事件会留在 `chat:push:{旧节点}` 中直到过期，表现为“新节点发的跨服通知丢失”。
@@ -337,7 +369,7 @@ NotifyTransport = stream   # 默认；改为 grpc 即回滚到直连 gRPC
 ### 7.4 回滚步骤
 
 1. 将所有 ChatServer 的 `NotifyTransport` 改为 `grpc` 并重启。
-2. 确认 gRPC 端口与节点注册信息可达；`ChatGrpcClient` 会优先用注册表地址，旧配置作为兜底。
+2. 确认 gRPC 端口与节点注册信息可达；`ChatGrpcClient` 只使用注册表地址，不再读取静态对端配置。
 3. 保留 `chat:push:*` 与 `chat:dead:*` 一段时间用于排查，不要立即删除；确认无积压后再按运维策略清理。
 4. 如果回滚前已有未消费事件，切回 gRPC 不会自动补发这些事件；需要人工评估是否重放。
 
