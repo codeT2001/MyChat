@@ -196,6 +196,49 @@ std::optional<std::string> RedisManagerPool::Get(const std::string& key)
     return val ? std::optional<std::string>(*val) : std::nullopt;
 }
 
+KvCompareDeleteResult RedisManagerPool::CompareAndDelete(
+    const std::string& key, const std::string& expected)
+{
+    auto* client = Client();
+    if (!client) {
+        LogUnavailable("CompareAndDelete", key);
+        return KvCompareDeleteResult::Error;
+    }
+
+    // Lua 在 Redis 单线程内完成 GET + 比对 + DEL，避免并发下同一 token 被消费两次。
+    // 返回：0=键不存在，1=值不匹配，2=已删除。
+    static constexpr char script[] =
+        "local value = redis.call('GET', KEYS[1]) "
+        "if not value then return 0 end "
+        "if value ~= ARGV[1] then return 1 end "
+        "redis.call('DEL', KEYS[1]) "
+        "return 2";
+
+    try {
+        std::vector<std::string> args { "EVAL", script, "1", key, expected };
+        auto reply = client->command(args.begin(), args.end());
+        if (!reply || reply->type != REDIS_REPLY_INTEGER) {
+            LOG_ERROR("[RedisManager] CompareAndDelete unexpected reply, key:%s", key.c_str());
+            return KvCompareDeleteResult::Error;
+        }
+        switch (reply->integer) {
+        case 0:
+            return KvCompareDeleteResult::NotFound;
+        case 1:
+            return KvCompareDeleteResult::Mismatch;
+        case 2:
+            return KvCompareDeleteResult::Deleted;
+        default:
+            LOG_ERROR("[RedisManager] CompareAndDelete unexpected result:%lld, key:%s",
+                static_cast<long long>(reply->integer), key.c_str());
+            return KvCompareDeleteResult::Error;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("[RedisManager] CompareAndDelete failed, key:%s, error:%s", key.c_str(), e.what());
+        return KvCompareDeleteResult::Error;
+    }
+}
+
 /* ---------- hash ---------- */
 void RedisManagerPool::HSet(const std::string& key, const std::string& field, const std::string& val)
 {

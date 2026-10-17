@@ -45,6 +45,7 @@ public:
 
     // 好友申请 / 认证：可注入失败，并记录调用参数
     bool authFriendApplyOk = true;
+    bool addFriendApplyOk = true;
     bool addFriendOk = true;
     int addFriendApplyCalls = 0;
     int32_t lastApplyFrom = -1;
@@ -76,7 +77,7 @@ public:
         ++addFriendApplyCalls;
         lastApplyFrom = from;
         lastApplyTo = to;
-        return true;
+        return addFriendApplyOk;
     }
 
     bool AuthFriendApply(int32_t from, int32_t to, int32_t status) override
@@ -127,6 +128,19 @@ public:
             return std::nullopt;
         }
         return it->second;
+    }
+    P1::KvCompareDeleteResult CompareAndDelete(
+        const std::string& key, const std::string& expected) override
+    {
+        auto it = data.find(key);
+        if (it == data.end()) {
+            return P1::KvCompareDeleteResult::NotFound;
+        }
+        if (it->second != expected) {
+            return P1::KvCompareDeleteResult::Mismatch;
+        }
+        data.erase(it);
+        return P1::KvCompareDeleteResult::Deleted;
     }
     void HSet(const std::string&, const std::string&, const std::string&) override {}
     std::optional<std::string> HGet(const std::string&, const std::string&) override { return std::nullopt; }
@@ -285,7 +299,7 @@ TESTFW_TEST(SearchUser_null_dependencies_is_safe)
 TESTFW_TEST(AddFriend_writes_apply_and_builds_notify)
 {
     Fixture f;
-    const P1::AddFriendPlan plan = P1::ProcessAddFriend(f.AddFriendRequest(1001, 1002), f.deps());
+    const P1::AddFriendPlan plan = P1::ProcessAddFriend(f.AddFriendRequest(1001, 1002), 1001, f.deps());
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
     CHECK_EQ(plan.fromUid, 1001);
     CHECK_EQ(plan.toUid, 1002);
@@ -296,6 +310,41 @@ TESTFW_TEST(AddFriend_writes_apply_and_builds_notify)
     CHECK_EQ(plan.notify["name"].asString(), std::string("applicant"));
     CHECK_EQ(plan.notify["desc"].asString(), std::string("please add me"));
     CHECK_EQ(plan.notify["apply_uid"].asInt(), 1001);
+}
+
+TESTFW_TEST(AddFriend_rejects_spoofed_from_uid)
+{
+    Fixture f;
+    const P1::AddFriendPlan plan = P1::ProcessAddFriend(
+        f.AddFriendRequest(2002, 1002), 1001, f.deps());
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK_EQ(f.userStore.addFriendApplyCalls, 0);
+    CHECK(plan.notify.empty());
+}
+
+TESTFW_TEST(AddFriend_rejects_missing_or_self_target)
+{
+    Fixture f;
+    const P1::AddFriendPlan self = P1::ProcessAddFriend(
+        f.AddFriendRequest(1001, 1001), 1001, f.deps());
+    CHECK_EQ(self.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+
+    Json::Value missing = f.AddFriendRequest(1001, 1002);
+    missing.removeMember("to_uid");
+    const P1::AddFriendPlan noTarget = P1::ProcessAddFriend(missing, 1001, f.deps());
+    CHECK_EQ(noTarget.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK_EQ(f.userStore.addFriendApplyCalls, 0);
+}
+
+TESTFW_TEST(AddFriend_apply_write_failure_returns_rpc_failed)
+{
+    Fixture f;
+    f.userStore.addFriendApplyOk = false;
+    const P1::AddFriendPlan plan = P1::ProcessAddFriend(
+        f.AddFriendRequest(1001, 1002), 1001, f.deps());
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::RPC_FAILED));
+    CHECK_EQ(plan.toUid, 0); // 失败时不能继续走通知路由
+    CHECK(plan.notify.empty());
 }
 
 // —— 认证动作解析 / 状态映射 ——
@@ -392,13 +441,29 @@ TESTFW_TEST(BuildAuthResultNotify_accept_without_profile_reports_error)
 }
 
 // —— 好友认证 ——
+TESTFW_TEST(AuthFriend_rejects_processing_for_another_user)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+    f.userStore.users.push_back(Fixture::MakeUser(1002, "other"));
+
+    // 当前会话是 1001，却试图替 1002 处理申请。
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(
+        f.AuthRequest(2001, 1002, 1), 1001, f.deps());
+    CHECK(!plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK(f.userStore.authFriendApplyArgs.empty());
+    CHECK(f.userStore.addFriendArgs.empty());
+}
+
 TESTFW_TEST(AuthFriend_invalid_action_returns_error_json)
 {
     Fixture f;
     f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
     f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
 
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 3), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 3), 1001, f.deps());
     CHECK(!plan.ok);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::ERROR_JSON));
     CHECK(f.userStore.authFriendApplyArgs.empty());  // 非法 action 不落库
@@ -408,7 +473,7 @@ TESTFW_TEST(AuthFriend_invalid_action_returns_error_json)
 TESTFW_TEST(AuthFriend_peer_not_found_returns_uid_invalid)
 {
     Fixture f;
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), 1001, f.deps());
     CHECK(!plan.ok);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
     CHECK(f.userStore.authFriendApplyArgs.empty());
@@ -420,7 +485,7 @@ TESTFW_TEST(AuthFriend_accept_updates_apply_and_adds_friend)
     f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
     f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
 
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), 1001, f.deps());
     CHECK(plan.ok);
     CHECK_EQ(plan.peerUid, 2001);
     CHECK_EQ(plan.selfUid, 1001);
@@ -454,7 +519,7 @@ TESTFW_TEST(AuthFriend_reject_does_not_add_friend)
     f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
     f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
 
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 2), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 2), 1001, f.deps());
     CHECK(plan.ok);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
     CHECK_EQ(plan.response["action"].asInt(), P1::FRIEND_ACTION_REJECT);
@@ -472,7 +537,7 @@ TESTFW_TEST(AuthFriend_apply_update_failure_returns_uid_invalid)
     f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
     f.userStore.authFriendApplyOk = false;
 
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), 1001, f.deps());
     CHECK(!plan.ok);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
     CHECK(f.userStore.addFriendArgs.empty());
@@ -485,7 +550,7 @@ TESTFW_TEST(AuthFriend_add_friend_failure_returns_uid_invalid)
     f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
     f.userStore.addFriendOk = false;
 
-    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), 1001, f.deps());
     CHECK(!plan.ok);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
     CHECK_EQ(f.userStore.addFriendArgs.size(), 1u);
@@ -495,7 +560,7 @@ TESTFW_TEST(AuthFriend_add_friend_failure_returns_uid_invalid)
 TESTFW_TEST(TextChatMsg_builds_response_and_extracts_msgs)
 {
     Fixture f;
-    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(f.TextChatRequest(1001, 2001));
+    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(f.TextChatRequest(1001, 2001), 1001);
     CHECK_EQ(plan.fromUid, 1001);
     CHECK_EQ(plan.toUid, 2001);
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
@@ -507,12 +572,21 @@ TESTFW_TEST(TextChatMsg_builds_response_and_extracts_msgs)
     CHECK_EQ(plan.msgs[0].second, std::string("hello"));
 }
 
+TESTFW_TEST(TextChatMsg_rejects_spoofed_sender)
+{
+    Fixture f;
+    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(
+        f.TextChatRequest(2001, 1002), 1001);
+    CHECK(plan.msgs.empty());
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+}
+
 TESTFW_TEST(TextChatMsg_handles_missing_or_bad_text_array)
 {
     Fixture f;
     Json::Value req = f.TextChatRequest(1001, 2001);
     req.removeMember("text_array");
-    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(req);
+    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(req, 1001);
     CHECK(plan.msgs.empty());
     CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
     CHECK_EQ(plan.response["to_uid"].asInt(), 2001);
@@ -617,6 +691,16 @@ TESTFW_TEST(Login_token_not_found_returns_uid_invalid)
     CHECK_EQ(f.userStore.getApplyListCalls, 0);
 }
 
+TESTFW_TEST(Login_empty_token_is_rejected_without_consuming)
+{
+    Fixture f;
+    f.kvStore.data[f.TokenKey(1001)] = "";
+    const P1::LoginResult r = P1::ProcessLogin(f.LoginRequest(1001, ""), f.deps());
+    CHECK(!r.ok);
+    CHECK_EQ(r.response["error"].asInt(), Ec(ErrorCodes::TOKEN_INVALID));
+    CHECK(f.kvStore.data.find(f.TokenKey(1001)) != f.kvStore.data.end());
+}
+
 TESTFW_TEST(Login_token_mismatch_returns_token_invalid)
 {
     Fixture f;
@@ -625,6 +709,7 @@ TESTFW_TEST(Login_token_mismatch_returns_token_invalid)
     CHECK(!r.ok);
     CHECK_EQ(r.response["error"].asInt(), Ec(ErrorCodes::TOKEN_INVALID));
     CHECK_EQ(f.userStore.getUserByUidCalls, 0); // 校验未过不应查资料
+    CHECK(f.kvStore.data.find(f.TokenKey(1001)) != f.kvStore.data.end()); // 错误 token 不消费
 }
 
 TESTFW_TEST(Login_user_not_found_returns_uid_invalid)
@@ -659,6 +744,21 @@ TESTFW_TEST(Login_success_returns_profile_and_lists)
     CHECK_EQ(r.response["apply_list"][0]["name"].asString(), std::string("bob"));
     CHECK_EQ(r.response["friend_list"].size(), 1u);
     CHECK_EQ(r.response["friend_list"][0]["name"].asString(), std::string("carol"));
+    CHECK(f.kvStore.data.find(f.TokenKey(1001)) == f.kvStore.data.end()); // token 一次性消费
+}
+
+TESTFW_TEST(Login_token_cannot_be_replayed)
+{
+    Fixture f;
+    f.kvStore.data[f.TokenKey(1001)] = "tok-right";
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "alice"));
+
+    const P1::LoginResult first = P1::ProcessLogin(f.LoginRequest(1001, "tok-right"), f.deps());
+    CHECK(first.ok);
+
+    const P1::LoginResult second = P1::ProcessLogin(f.LoginRequest(1001, "tok-right"), f.deps());
+    CHECK(!second.ok);
+    CHECK_EQ(second.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
 }
 
 TESTFW_TEST(Login_success_with_empty_lists)

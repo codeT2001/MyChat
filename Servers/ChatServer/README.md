@@ -10,7 +10,7 @@
 
 - **TCP 连接管理**：基于 Boost.Asio 多 io_context 线程池 accept，每个连接一个 `CSession`
 - **单线程业务队列**：收包反序列化成 `MsgNode` 投递到 `LogicSystem` 队列，由独立逻辑线程串行处理（业务无锁）
-- **登录二次校验**：GateServer 颁发的 token 在 TCP 建连后仍需经 StatusServer gRPC 校验
+- **登录二次校验**：GateServer 颁发的 token 在 TCP 建连后由 ChatServer 直连 Redis，通过 Lua 原子完成「读取 + 比对 + 删除」，同一 token 只能成功登录一次
 - **好友系统**：搜索用户、申请、同意（action=1）/拒绝（action=2）；拒绝后对方重新申请自动复位为待处理
 - **文本聊天**：`text_array` 批量承载多条文本（每条带客户端生成的 msg_id），同服直接推 session，跨服写入目标节点的 `chat:push:{node}` Stream
 - **可靠的跨节点事件投递**：Redis Stream consumer group + `XACK` + `XPENDING/XCLAIM` 重试 + 去重键 + 死信流，至少一次投递
@@ -62,8 +62,8 @@ flowchart TD
 
 帧格式（**网络字节序 / 大端**，通过 `htons`/`ntohs`/`htonl`/`ntohl` 转换）：`2 字节 msgId + 4 字节 body 长度 + JSON body`。客户端 Qt 侧对应 `QDataStream::BigEndian`。
 
-> ⚠️ **单帧 body 硬上限 `MAX_MSG_LENGTH = 2048` 字节**（定义在 `msg_codec.h`，编解码在 `msg_codec.cpp`）。
-> 超限帧被直接拒绝并断开连接；客户端发送更长内容必须自行分批。
+> ⚠️ **收发上限不对称**（定义在 `msg_codec.h`）：客户端请求 body 上限 `MAX_MSG_LENGTH = 2048` 字节，超限直接断连；服务端响应 body 上限 `MAX_OUTBOUND_MSG_LENGTH = 1MB`，登录回包中的好友/申请列表可正常下发，但超限同样拒绝发送并关闭连接。
+> 客户端发送更长内容必须自行分批。
 > 帧头字节序有逐字节单测（`tests/test_msg_codec.cpp`）钉住，与客户端 `QDataStream` 大端一致。
 
 | 数值 | 名称 | 方向 | body 关键字段 |
@@ -90,18 +90,16 @@ sequenceDiagram
     autonumber
     participant C as ChatClient
     participant CS as ChatServer
-    participant SS as StatusServer
     participant R as Redis
     participant DB as MySQL
 
     C->>CS: TCP 建连 + CHAT_LOGIN_REQ {uid, token}
-    CS->>SS: gRPC Login(uid, token)
-    SS->>R: GET utoken_uid 并比对
+    CS->>R: EVAL（GET utoken_uid + 比对 + DEL，原子）
     alt token 不存在
         CS-->>C: error=8 UID_INVALID
     else token 不匹配
         CS-->>C: error=9 TOKEN_INVALID
-    else 校验通过（SS 删除 utoken）
+    else 校验通过（token 已一次性消费）
         CS->>R: GET uinfo_uid（miss 回源 MySQL 并回填）
         CS->>DB: GetApplyList(uid) + GetFriendList(uid)
         CS->>R: HINCRBY login_count 本节点 1
@@ -219,7 +217,7 @@ sequenceDiagram
 
 | 位置 | 用途 |
 |---|---|
-| Redis `utoken_{uid}` | Gate/Status 颁发的登录 token，登录时经 StatusServer 校验并删除 |
+| Redis `utoken_{uid}` | Gate/Status 颁发的登录 token（TTL 600 秒），登录时由 ChatServer 原子比对并删除 |
 | Redis `uinfo_{uid}` | 用户资料缓存（未命中回源 MySQL 并回写），会话断开时删除 |
 | Redis `userver_{uid}` | 用户所在节点名，跨服路由依据；登录时写入 |
 | Redis Hash `login_count` | 各节点在线计数，登录 `HINCRBY +1`，断开 `HINCRBY -1`，进程退出 `HDel` 节点 |
@@ -231,9 +229,9 @@ sequenceDiagram
 | MySQL `friend_apply` | 申请记录，唯一键 (from_uid,to_uid)，`status` 0待处理/1同意/2拒绝 |
 | MySQL `friend` | 同意后写入的双向好友关系 |
 
-> 会话断开（`RemoveSession`）时清理 Redis：`login_count` 扣减、删除 `userver_{uid}`（仅当仍指向本节点）、删除 `utoken_{uid}`；被新登录顶掉的旧会话不清理。
+> 会话断开（`RemoveSession`）时清理 Redis：`login_count` 扣减、删除 `userver_{uid}`（仅当仍指向本节点）、删除 `uinfo_{uid}`；被新登录顶掉的旧会话不清理。
 >
-> ⚠️ `utoken_{uid}` 无 TTL，进程异常退出会残留，需靠下次登录覆盖或人工清理。
+> `utoken_{uid}` 在登录成功时已被原子消费，断开时不再删除，避免误删新登录刚写入的 token；未消费的 token 由 600 秒 TTL 自然失效。
 
 ## 多实例配置
 
@@ -288,7 +286,7 @@ MaxPendingPerWorker = 4096
 - 回包统一用 `HandlerContext`（构造解析请求、析构发送响应），新增错误分支直接 `return`，不要漏发响应
 - 新增业务判定先写进 `chat_flow.*` 的纯函数并补单测（见 `tests/test_chat_flow.cpp`），Handler 只保留路由与发送
 - 日志用 `LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR`，**禁止 `std::cout`**；含 token/密码的请求禁止打印整个 body
-- 帧长上限 2048 字节，新增协议字段注意别超
+- 客户端请求帧 body 上限 2048 字节；服务端响应上限 1MB。新增协议字段时按方向分别检查
 - 单线程编译验证：`cmake --build build --target chatServer -j1`
 
 ---

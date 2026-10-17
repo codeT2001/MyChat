@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <limits>
 #include <optional>
 
 #include "chat/log.h"
@@ -11,6 +12,21 @@ namespace P1 {
 
 // uinfo_ 用户资料缓存的统一 TTL：防止资料变更后脏数据永久驻留
 constexpr auto USER_INFO_CACHE_TTL = std::chrono::seconds(3600);
+
+namespace {
+// 读取必填的正整数 uid；非整数、<=0 或溢出 int32 时返回 nullopt。
+std::optional<int32_t> ReadPositiveUid(const Json::Value& req, const char* field)
+{
+    if (!req.isMember(field) || !req[field].isIntegral()) {
+        return std::nullopt;
+    }
+    const Json::Int64 value = req[field].asInt64();
+    if (value <= 0 || value > std::numeric_limits<int32_t>::max()) {
+        return std::nullopt;
+    }
+    return static_cast<int32_t>(value);
+}
+} // namespace
 
 Json::Value ProcessSearchUser(const Json::Value& req, ChatDependencies deps)
 {
@@ -111,20 +127,39 @@ LoginResult ProcessLogin(const Json::Value& req, ChatDependencies deps)
     const int32_t uid = req["uid"].asInt();
     const std::string token = req["token"].asString();
     const std::string uidStr = std::to_string(uid);
+    if (uid <= 0) {
+        rsp["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        LOG_WARN("[LogicSystem] login failed, invalid uid:%d", uid);
+        return result;
+    }
+    if (token.empty()) {
+        rsp["error"] = static_cast<int32_t>(ErrorCodes::TOKEN_INVALID);
+        LOG_WARN("[LogicSystem] login failed, empty token, uid:%d", uid);
+        return result;
+    }
 
-    // 查询 token 是否正确
+    // token 必须一次性消费：Lua 在 Redis 内完成 GET + 比对 + DEL，
+    // 避免同一 token 在 TTL 内被并发重放（顶号攻击）。
+    if (deps.kv_store == nullptr) {
+        rsp["error"] = static_cast<int32_t>(ErrorCodes::RPC_FAILED);
+        LOG_ERROR("[LogicSystem] login failed, kv store unavailable, uid:%d", uid);
+        return result;
+    }
     const std::string tokenKey = std::string(USER_TOKEN_PREFIX) + uidStr;
-    auto tokenValue = (deps.kv_store == nullptr)
-        ? std::optional<std::string> {}
-        : deps.kv_store->Get(tokenKey);
-    if (!tokenValue.has_value()) {
+    switch (deps.kv_store->CompareAndDelete(tokenKey, token)) {
+    case KvCompareDeleteResult::Deleted:
+        break;
+    case KvCompareDeleteResult::NotFound:
         rsp["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         LOG_ERROR("[LogicSystem] login failed, token not found in redis, uid:%d", uid);
         return result;
-    }
-    if (*tokenValue != token) {
+    case KvCompareDeleteResult::Mismatch:
         rsp["error"] = static_cast<int32_t>(ErrorCodes::TOKEN_INVALID);
         LOG_ERROR("[LogicSystem] login failed, token invalid, uid:%d", uid);
+        return result;
+    case KvCompareDeleteResult::Error:
+        rsp["error"] = static_cast<int32_t>(ErrorCodes::RPC_FAILED);
+        LOG_ERROR("[LogicSystem] login failed, token store error, uid:%d", uid);
         return result;
     }
 
@@ -167,27 +202,36 @@ LoginResult ProcessLogin(const Json::Value& req, ChatDependencies deps)
 
 // —— 好友申请 / 认证 / 文本消息 ——
 
-AddFriendPlan ProcessAddFriend(const Json::Value& req, ChatDependencies deps)
+AddFriendPlan ProcessAddFriend(const Json::Value& req, int32_t actorUid, ChatDependencies deps)
 {
     AddFriendPlan plan;
-    const int32_t fromUid = req["from_uid"].asInt();
-    const int32_t toUid = req["to_uid"].asInt();
+    const auto fromUid = ReadPositiveUid(req, "from_uid");
+    const auto toUid = ReadPositiveUid(req, "to_uid");
+    if (!fromUid || !toUid || actorUid <= 0 || *fromUid != actorUid || *toUid == actorUid) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        LOG_WARN("[LogicSystem] AddFriend rejected, actor:%d, from:%s, to:%s",
+            actorUid, fromUid ? std::to_string(*fromUid).c_str() : "invalid",
+            toUid ? std::to_string(*toUid).c_str() : "invalid");
+        return plan;
+    }
     const std::string name = req["name"].asString();
     const std::string desc = req["desc"].asString();
 
-    plan.fromUid = fromUid;
-    plan.toUid = toUid;
+    if (deps.user_store == nullptr || !deps.user_store->AddFriendApply(*fromUid, *toUid)) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::RPC_FAILED);
+        LOG_ERROR("[LogicSystem] AddFriendApply failed, from:%d, to:%d", *fromUid, *toUid);
+        return plan;
+    }
+    plan.fromUid = *fromUid;
+    plan.toUid = *toUid;
     plan.response["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
 
-    if (deps.user_store != nullptr) {
-        deps.user_store->AddFriendApply(fromUid, toUid);
-    }
     // 目标用户本节点在线时直接收通知（字段与旧版本保持一致）
     Json::Value& notify = plan.notify;
     notify["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
     notify["desc"] = desc;
     notify["name"] = name;
-    notify["apply_uid"] = fromUid;
+    notify["apply_uid"] = *fromUid;
     return plan;
 }
 
@@ -215,11 +259,21 @@ int32_t ApplyStatusForAction(int32_t action)
     return (action == FRIEND_ACTION_ACCEPT) ? APPLY_STATUS_ACCEPTED : APPLY_STATUS_REJECTED;
 }
 
-AuthFriendPlan ProcessAuthFriend(const Json::Value& req, ChatDependencies deps)
+AuthFriendPlan ProcessAuthFriend(const Json::Value& req, int32_t actorUid, ChatDependencies deps)
 {
     AuthFriendPlan plan;
-    const int32_t peerUid = req["from_uid"].asInt();  // 申请者
-    const int32_t selfUid = req["to_uid"].asInt();    // 处理者（本人）
+    const auto peerUidOpt = ReadPositiveUid(req, "from_uid");  // 申请者
+    const auto selfUidOpt = ReadPositiveUid(req, "to_uid");    // 处理者（本人）
+    if (!peerUidOpt || !selfUidOpt || actorUid <= 0 ||
+        *selfUidOpt != actorUid || *peerUidOpt == actorUid) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        LOG_WARN("[LogicSystem] AuthFriend rejected, actor:%d, from:%s, to:%s",
+            actorUid, peerUidOpt ? std::to_string(*peerUidOpt).c_str() : "invalid",
+            selfUidOpt ? std::to_string(*selfUidOpt).c_str() : "invalid");
+        return plan;
+    }
+    const int32_t peerUid = *peerUidOpt;
+    const int32_t selfUid = *selfUidOpt;
     const std::string remarkName = req["remark_name"].asString();
 
     plan.peerUid = peerUid;
@@ -311,11 +365,21 @@ Json::Value BuildAuthResultNotify(int32_t peerUid, int32_t selfUid, int32_t acti
     return val;
 }
 
-TextChatPlan ProcessTextChatMsg(const Json::Value& req)
+TextChatPlan ProcessTextChatMsg(const Json::Value& req, int32_t actorUid)
 {
     TextChatPlan plan;
-    const int32_t selfUid = req["from_uid"].asInt();  // 发送者
-    const int32_t peerUid = req["to_uid"].asInt();    // 接收者
+    const auto selfUidOpt = ReadPositiveUid(req, "from_uid");  // 发送者
+    const auto peerUidOpt = ReadPositiveUid(req, "to_uid");    // 接收者
+    if (!selfUidOpt || !peerUidOpt || actorUid <= 0 ||
+        *selfUidOpt != actorUid || *peerUidOpt == actorUid) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        LOG_WARN("[LogicSystem] TextChatMsg rejected, actor:%d, from:%s, to:%s",
+            actorUid, selfUidOpt ? std::to_string(*selfUidOpt).c_str() : "invalid",
+            peerUidOpt ? std::to_string(*peerUidOpt).c_str() : "invalid");
+        return plan;
+    }
+    const int32_t selfUid = *selfUidOpt;
+    const int32_t peerUid = *peerUidOpt;
     const Json::Value array = req["text_array"];
     plan.fromUid = selfUid;
     plan.toUid = peerUid;

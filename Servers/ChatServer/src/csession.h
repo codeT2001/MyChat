@@ -17,19 +17,26 @@ public:
     void Start();
     void SetRemoveCallback(std::function<void(uint32_t)>&& callback);
     void InitSocketOptions();
-    void SendMessage(const char* data, size_t len, uint16_t msgId);
-    void SendMessage(const std::string& msg, short msgId);
+    bool SendMessage(const char* data, size_t len, uint16_t msgId);
+    bool SendMessage(const std::string& msg, uint16_t msgId);
+    // 停止接收新发送任务，并在已排队消息写完后关闭连接（用于顶号踢下线）。
+    void CloseAfterFlush();
     uint32_t GetSessionId() const
     {
         return sessionId_;
     }
+    bool IsClosed() const
+    {
+        return isClose_.load();
+    }
     uint32_t GetUserUid() const
     {
-        return userId_;
+        return userId_.load();
     }
-    void SetUserUid(uint32_t uid)
+    bool TrySetUserUid(uint32_t uid)
     {
-        userId_ = uid;
+        uint32_t expected = 0;
+        return userId_.compare_exchange_strong(expected, uid);
     }
 
 private:
@@ -38,6 +45,8 @@ private:
     void ReadMessageBody(uint32_t bodySize);
     void DoWrite();
     void HandleWrite(const boost::system::error_code& ec);
+    void TryCloseAfterFlush();
+    void ScheduleClose();
     void Close();
     ip::tcp::socket socket_;
     std::mutex sendMtx_;
@@ -45,8 +54,9 @@ private:
     std::shared_ptr<MsgNode> msgHeadNode_;
     std::shared_ptr<MsgNode> msgBodyNode_;
     std::atomic<bool> isClose_;
+    std::atomic<bool> closeAfterWrite_;
     uint32_t sessionId_;
-    uint32_t userId_;
+    std::atomic<uint32_t> userId_;
     std::function<void(uint32_t)> removeCallback_;
 };
 

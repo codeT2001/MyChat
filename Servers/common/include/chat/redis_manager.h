@@ -47,6 +47,8 @@ public:
     // 带过期时间的写入：缓存类数据用，避免脏数据永久驻留
     void SetEx(const std::string& key, const std::string& val, std::chrono::seconds ttl) override;
     std::optional<std::string> Get(const std::string& key) override;
+    KvCompareDeleteResult CompareAndDelete(
+        const std::string& key, const std::string& expected) override;
 
     /* ---------- hash ---------- */
     void HSet(const std::string& key, const std::string& field, const std::string& val) override;

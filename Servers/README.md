@@ -238,7 +238,7 @@ service VerifyService { rpc GetVerifyCode(GetVerifyReq) returns (GetVerifyRsp); 
 
 service StatusService {
   rpc GetChatServer(GetChatServerReq) returns (GetChatServerRsp);  // 分配节点 + 颁发 token
-  rpc Login(LoginReq) returns (LoginRsp);                          // 校验 token（TCP 登录时由 ChatServer 调用）
+  rpc Login(LoginReq) returns (LoginRsp);                          // 校验并一次性消费 token
 }
 
 service ChatService {  // ChatServer 节点间直连通道（NotifyTransport=grpc）

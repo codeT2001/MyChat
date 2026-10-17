@@ -133,11 +133,11 @@
 
 > 📎 本节 P2-3/P2-5/P2-6 的**方案展开**（Protobuf / RabbitMQ / Redis Stream / WebSocket 选型）见 `chat网络传输与中间件改进.md`。
 
-### 🟠 P2-1 TCP 单帧长度字段未校验发送上限
+### ✅ P2-1 TCP 单帧长度字段未校验发送上限（已修复）
 
 - **位置**：`Servers/ChatServer/src/csession.cpp:174`（发送）；`:98`（接收校验）
 - **问题**：长度字段已扩展为 `uint32_t`，发送侧强转却未校验上限；客户端/服务端 `MAX_MSG_LENGTH` 定义不一致（服务端 2048）。
-- **建议**：① 发送前断言上限，超限走分片；② 统一常量（单一来源）。
+- **已修复**：发送侧新增 `MAX_OUTBOUND_MSG_LENGTH = 1MB` 校验，超限拒绝发送并关闭会话；`MsgNode` 长度字段改为 `uint32_t`，与 4 字节帧头一致。客户端请求仍保持 2KB 上限，收发上限按方向显式区分。
 
 ### 🟠 P2-2 发送队列满静默丢消息
 
@@ -163,23 +163,23 @@
 - **问题**：跨服用**同步阻塞 gRPC 直连**；节点数增加需维护 O(N²) 连接、改 `PeerServer` 配置重启。
 - **建议**：改 **Redis Stream**（复用现有 Redis）做异步消息总线，兼得解耦 + 削峰 + 不丢。📎 见专项文档。
 
-### 🟡 P2-6 Gate 未处理非 GET/POST 方法
+### ✅ P2-6 Gate 未处理非 GET/POST 方法（已修复）
 
 - **位置**：`Servers/GateServer/src/http_connection.cpp:132-157`
 - **问题**：其他方法（PUT/DELETE/HEAD）既不响应也不取消，挂到 60s 超时。
-- **建议**：返回 `405` 并正常关闭。
+- **已修复**：非 GET/POST 立即返回 `405 Method Not Allowed` 与 `Allow: GET, POST`，不再挂到超时。
 
-### 🟡 P2-7 RefreshCache 的 std::stoi 无保护
+### ✅ P2-7 RefreshCache 的 std::stoi 无保护（已修复）
 
 - **位置**：`Servers/StatusServer/src/status_service_impl.cpp:172`
 - **问题**：`LOGIN_COUNT` 值非数字时抛异常，导致本轮刷新整体失败。
-- **建议**：用 `std::from_chars` 安全解析，异常按默认值+告警。
+- **已修复**：改用 `std::from_chars` 解析 `login_count`，非法/负数/越界值按缺省负载处理并告警，单条脏值不会导致整轮刷新失败。
 
-### 🟠 P2-8 StatusServer 信号线程捕获栈引用
+### ✅ P2-8 StatusServer 信号线程捕获栈引用（已修复）
 
 - **位置**：`Servers/StatusServer/main.cpp:45`
 - **问题**：`std::thread([&io_context]{...}).detach()` 捕获栈引用，提前返回则悬垂。
-- **建议**：按值/`shared_ptr` 捕获，或明确 join 顺序。
+- **已修复**：改为具名线程，`server->Wait()` 返回后先 `io_context.stop()` 再 `join()`，保证线程不会引用已析构的栈对象。
 
 ---
 

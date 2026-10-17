@@ -48,4 +48,9 @@ bool IsValidMsgBodySize(uint32_t bodySize)
     return bodySize <= MAX_MSG_LENGTH;
 }
 
+bool IsValidOutboundMsgBodySize(uint32_t bodySize)
+{
+    return bodySize <= MAX_OUTBOUND_MSG_LENGTH;
+}
+
 } // namespace P1

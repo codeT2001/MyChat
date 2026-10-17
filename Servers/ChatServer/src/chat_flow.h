@@ -28,6 +28,7 @@ bool LoadBaseUserInfo(const std::string& baseKey, int32_t uid,
     std::shared_ptr<UserInfo>& userInfo, ChatDependencies deps);
 
 // 登录流程的纯逻辑结果：response 为回包 JSON，ok 表示登录校验通过。
+// token 在成功校验时由 CompareAndDelete 原子消费；后续资料读取失败需重新登录获取 token。
 // 通过后的「路由覆盖 / 顶号 / 会话绑定」依赖 CSession 与节点信息，仍留在 Handler 里。
 struct LoginResult {
     Json::Value response;
@@ -42,6 +43,7 @@ LoginResult ProcessLogin(const Json::Value& req, ChatDependencies deps);
 // —— 好友申请 / 认证 / 文本消息（客户端可见的 JSON 契约集中在这里） ——
 
 // 加好友申请：落库 + 给申请者的回包 + 给目标用户的本地通知。
+// actorUid 必须来自已登录会话，请求中的 from_uid 必须与之一致。
 // 跨节点通知所需的申请人资料（icon/sex/nick）由调用方在需要时再取，避免多余查询。
 struct AddFriendPlan {
     Json::Value response;
@@ -49,7 +51,7 @@ struct AddFriendPlan {
     int32_t fromUid = 0;
     int32_t toUid = 0;
 };
-AddFriendPlan ProcessAddFriend(const Json::Value& req, ChatDependencies deps);
+AddFriendPlan ProcessAddFriend(const Json::Value& req, int32_t actorUid, ChatDependencies deps);
 
 // 认证请求的 action：缺省视为同意（兼容旧客户端）；非 1/2 返回 -1
 int32_t ResolveAuthAction(const Json::Value& req);
@@ -57,7 +59,8 @@ int32_t ResolveAuthAction(const Json::Value& req);
 // 认证动作 → 申请状态（同意 1 / 拒绝 2）
 int32_t ApplyStatusForAction(int32_t action);
 
-// 好友认证：校验 action → 取申请人资料 → 更新申请状态 →（同意时）建立好友关系。
+// 好友认证：校验请求中的 to_uid 必须是当前会话用户 → 校验 action →
+// 取申请人资料 → 更新申请状态 →（同意时）建立好友关系。
 // 通知申请者依赖会话/跨节点 RPC，留在 Handler 里。
 struct AuthFriendPlan {
     Json::Value response;
@@ -67,20 +70,21 @@ struct AuthFriendPlan {
     int32_t selfUid = 0;
     int32_t action = 0;
 };
-AuthFriendPlan ProcessAuthFriend(const Json::Value& req, ChatDependencies deps);
+AuthFriendPlan ProcessAuthFriend(const Json::Value& req, int32_t actorUid, ChatDependencies deps);
 
 // 申请者视角的认证结果通知：同意时带上处理者资料（selfInfo 为空则 error=UID_INVALID）
 Json::Value BuildAuthResultNotify(int32_t peerUid, int32_t selfUid, int32_t action,
     const UserInfo* selfInfo);
 
-// 文本消息：回包 + 跨节点 gRPC 需要的 (msg_id, content) 列表
+// 文本消息：回包 + 跨节点 gRPC 需要的 (msg_id, content) 列表。
+// actorUid 必须来自已登录会话，请求中的 from_uid 必须与之一致。
 struct TextChatPlan {
     Json::Value response;
     std::vector<std::pair<std::string, std::string>> msgs;
     int32_t fromUid = 0;
     int32_t toUid = 0;
 };
-TextChatPlan ProcessTextChatMsg(const Json::Value& req);
+TextChatPlan ProcessTextChatMsg(const Json::Value& req, int32_t actorUid);
 
 // —— 跨节点（其他 ChatServer 通过 gRPC 发来）通知的 JSON 组装 ——
 

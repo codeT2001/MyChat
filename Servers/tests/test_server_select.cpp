@@ -89,4 +89,16 @@ TESTFW_TEST(PickMinServer_ignores_extra_count_entries)
     CHECK_EQ(PickMinServer(snapshot, counts).name, std::string("server2"));
 }
 
+TESTFW_TEST(PickMinServer_malformed_count_does_not_throw)
+{
+    // Redis 中的计数被外部写脏时，应按缺省负载处理，不能抛出异常拖垮整轮刷新。
+    const auto snapshot = Snapshot({ { "server1", "50061" }, { "server2", "50062" } });
+    const std::unordered_map<std::string, std::string> counts {
+        { "server1", "not-a-number" }, { "server2", "7" }
+    };
+    const ChatServer picked = PickMinServer(snapshot, counts);
+    CHECK_EQ(picked.name, std::string("server2"));
+    CHECK_EQ(picked.con_count, 7);
+}
+
 } // namespace

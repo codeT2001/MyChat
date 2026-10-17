@@ -71,7 +71,9 @@ target_link_libraries(test_chat_flow PRIVATE ${JSONCPP_LIB})
 chat_add_test(test_server_select
     ${TEST_SRC_DIR}/test_server_select.cpp
     ${REPO_SERVER_DIR}/StatusServer/src/server_select.cpp)
-target_include_directories(test_server_select PRIVATE ${REPO_SERVER_DIR}/StatusServer/src)
+target_include_directories(test_server_select PRIVATE
+    ${REPO_SERVER_DIR}/common/include
+    ${REPO_SERVER_DIR}/StatusServer/src)
 
 # StatusServer 登录 token 流程（纯函数 + 接口依赖）
 chat_add_test(test_status_flow

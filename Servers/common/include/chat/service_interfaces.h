@@ -35,12 +35,22 @@ public:
 };
 
 // KV 存储（Redis 侧子集）
+// 原子“比对后删除”：用于登录 token 等一次性凭证，避免 GET + DEL 之间的重放窗口。
+enum class KvCompareDeleteResult {
+    Deleted,
+    NotFound,
+    Mismatch,
+    Error,
+};
+
 class IKeyValueStore {
 public:
     virtual ~IKeyValueStore() = default;
     virtual void Set(const std::string& key, const std::string& val) = 0;
     virtual void SetEx(const std::string& key, const std::string& val, std::chrono::seconds ttl) = 0;
     virtual std::optional<std::string> Get(const std::string& key) = 0;
+    virtual KvCompareDeleteResult CompareAndDelete(
+        const std::string& key, const std::string& expected) = 0;
     virtual void HSet(const std::string& key, const std::string& field, const std::string& val) = 0;
     virtual std::optional<std::string> HGet(const std::string& key, const std::string& field) = 0;
     virtual std::unordered_map<std::string, std::string> HGetAll(const std::string& key) = 0;

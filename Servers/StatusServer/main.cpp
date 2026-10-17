@@ -41,12 +41,16 @@ void RunServer()
         }
     });
 
-    // 在单独的线程中运行io_context
-    std::thread([&io_context]() { io_context.run(); }).detach();
+    // 在单独的线程中运行 io_context；RunServer 返回前必须 join，
+    // 否则 detached 线程可能引用已析构的栈上 io_context（悬垂引用）。
+    std::thread io_thread([&io_context]() { io_context.run(); });
 
     // 等待服务器关闭
     server->Wait();
     io_context.stop(); // 停止io_context
+    if (io_thread.joinable()) {
+        io_thread.join();
+    }
 }
 
 int main(int argc, char** argv)

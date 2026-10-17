@@ -69,6 +69,7 @@ void HttpConnection::HandleRequest()
             response_.set(http::field::server, "GateServer");
         }
         WriteResponse();
+        return;
     }
 
     if (request_.method() == http::verb::post) {
@@ -82,7 +83,16 @@ void HttpConnection::HandleRequest()
             response_.set(http::field::server, "GateServer");
         }
         WriteResponse();
+        return;
     }
+
+    // 其它方法（PUT/DELETE/HEAD 等）必须立即回 405，不能既不响应也不关闭，
+    // 否则连接会一直挂到 60s 超时。
+    response_.result(http::status::method_not_allowed);
+    response_.set(http::field::allow, "GET, POST");
+    response_.set(http::field::content_type, "text/plain");
+    beast::ostream(response_.body()) << "method not allowed\r\n";
+    WriteResponse();
 }
 
 void HttpConnection::PreParseGetParams()

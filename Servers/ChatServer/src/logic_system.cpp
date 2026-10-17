@@ -116,7 +116,7 @@ void LogicSystem::DealMessage()
 
 void LogicSystem::ProcessMessage(std::shared_ptr<LogicNode> node)
 {
-    if (!node || !node->msgNode_) {
+    if (!node || !node->msgNode_ || !node->session_ || node->session_->IsClosed()) {
         return;
     }
     auto iter = handleFuncs_.find(static_cast<MSG_IDS>(node->msgNode_->GetMsgId()));
@@ -133,31 +133,62 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     // 注意：请求体含 token，禁止整体打印
     LOG_DEBUG("[LogicSystem] HandleLogin, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::CHAT_LOGIN_RSP, msg);
+    // 一条 TCP 连接只能绑定一个账号；切换账号必须重新建连，
+    // 否则旧 uid 的会话映射会残留。
+    if (session->GetUserUid() != 0) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] login rejected, session already bound, sessionId:%u, uid:%u",
+            session->GetSessionId(), session->GetUserUid());
+        return;
+    }
+
     // 校验 token + 拉资料 + 组装申请/好友列表（纯逻辑，见 chat_flow.cpp）
     const LoginResult login = ProcessLogin(ctx.Request(), deps_);
     ctx.Response() = login.response;
     if (!login.ok) {
         return;
     }
+    if (session->IsClosed()) {
+        LOG_WARN("[LogicSystem] login aborted, session closed during validation, sessionId:%u",
+            session->GetSessionId());
+        return;
+    }
 
     const int32_t uid = login.uid;
     const std::string uid_str = std::to_string(uid);
     auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
-    // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前），
-    // 否则取到的都是新登录自己的状态
+    // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前）。
     auto oldServer = RedisManagerPool::GetInstance().Get(USER_SERVER_PREFIX + uid_str);
-    std::shared_ptr<CSession> oldLocalSession;
-    if (oldServer.has_value() && *oldServer == serverName) {
-        oldLocalSession = UserManager::GetInstance().GetSession(uid);
+    auto oldLocalSession = UserManager::GetInstance().GetSession(uid);
+    // 注意：即使旧会话已置 closed，只要映射仍在，就说明 RemoveSession 还没完成扣减；
+    // 此时不能把它当成「本节点无活跃会话」，否则会多 +1 且旧会话清理时不会扣减。
+    const bool hadActiveLocalSession = static_cast<bool>(oldLocalSession);
+
+    if (!session->TrySetUserUid(static_cast<uint32_t>(uid))) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] login binding race, sessionId:%u, uid:%d",
+            session->GetSessionId(), uid);
+        return;
     }
-    RedisManagerPool::GetInstance().HIncrBy(LOGIN_COUNT, serverName, 1);
+
+    // 同节点重复登录只是替换会话，在线连接数不变；只有本节点原本没有活跃会话时才 +1。
+    // 这样旧会话断开时 RmvUserSession 返回 false，也不会因“少减一次”导致计数泄漏。
+    if (!hadActiveLocalSession) {
+        if (!RedisManagerPool::GetInstance().HIncrBy(LOGIN_COUNT, serverName, 1).has_value()) {
+            LOG_WARN("[LogicSystem] login count increment failed, server:%s, uid:%d",
+                serverName.c_str(), uid);
+        }
+    }
     RedisManagerPool::GetInstance().Set(USER_SERVER_PREFIX + uid_str, serverName);
-    session->SetUserUid(uid);
     UserManager::GetInstance().SetUserSession(uid, session);
+
     // 新会话绑定成功后再踢旧会话：旧会话断开清理时 RmvUserSession 校验
-    // 绑定的已不是自己，不会误删本次新登录的 Redis 状态
-    if (oldServer.has_value() && !oldServer->empty()) {
-        KickOldSession(uid, *oldServer, oldLocalSession);
+    // 绑定的已不是自己，不会误删本次新登录的 Redis 状态。
+    if (oldLocalSession) {
+        KickOldSession(uid, serverName, oldLocalSession);
+    }
+    if (oldServer.has_value() && !oldServer->empty() && *oldServer != serverName) {
+        KickOldSession(uid, *oldServer, nullptr);
     }
     LOG_INFO("[LogicSystem] login success, uid:%d, name:%s", uid, login.name.c_str());
 }
@@ -177,6 +208,8 @@ void LogicSystem::KickOldSession(int32_t uid, const std::string& oldServer,
         LOG_WARN("[LogicSystem] kick old session on self, uid:%d, sessionId:%u",
             uid, oldLocalSession->GetSessionId());
         oldLocalSession->SendMessage(kickMsg, static_cast<uint16_t>(MSG_IDS::NOTIFY_KICK));
+        // 顶层客户端可能忽略通知；服务端必须主动关闭旧连接，避免两个会话同时有效。
+        oldLocalSession->CloseAfterFlush();
         return;
     }
     // 旧会话在其他节点：走统一跨节点出口（Stream 或 gRPC），异步派发。
@@ -213,6 +246,11 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
 {
     LOG_DEBUG("[LogicSystem] HandleSearchUser, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::SEARCH_USER_RSP, msg);
+    const int32_t actorUid = static_cast<int32_t>(session->GetUserUid());
+    if (actorUid <= 0) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return;
+    }
     ctx.Response() = ProcessSearchUser(ctx.Request(), deps_);
 }
 
@@ -221,8 +259,13 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
 {
     LOG_DEBUG("[LogicSystem] HandleAddFriend, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::ADD_FRIEND_RSP, msg);
+    const int32_t actorUid = static_cast<int32_t>(session->GetUserUid());
+    if (actorUid <= 0) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return;
+    }
     // 落库 + 回包 + 本地通知内容（纯逻辑，见 chat_flow.cpp）
-    const AddFriendPlan plan = ProcessAddFriend(ctx.Request(), deps_);
+    const AddFriendPlan plan = ProcessAddFriend(ctx.Request(), actorUid, deps_);
     ctx.Response() = plan.response;
 
     auto to_server = GetPeerServer(plan.toUid);
@@ -265,8 +308,13 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
 {
     LOG_DEBUG("[LogicSystem] HandleAuthFriend, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::AUTH_FRIEND_RSP, msg);
+    const int32_t actorUid = static_cast<int32_t>(session->GetUserUid());
+    if (actorUid <= 0) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return;
+    }
     // 校验 action → 更新申请状态 →（同意时）建立好友关系（纯逻辑，见 chat_flow.cpp）
-    const AuthFriendPlan plan = ProcessAuthFriend(ctx.Request(), deps_);
+    const AuthFriendPlan plan = ProcessAuthFriend(ctx.Request(), actorUid, deps_);
     ctx.Response() = plan.response;
     if (!plan.ok) {
         return;
@@ -312,8 +360,13 @@ void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uin
 {
     LOG_INFO("[LogicSystem] HandleTextChatMsg, msgId:%d", msgId);
     HandlerContext ctx(session, MSG_IDS::TEXT_CHAT_MSG_RSP, msg);
+    const int32_t actorUid = static_cast<int32_t>(session->GetUserUid());
+    if (actorUid <= 0) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return;
+    }
     // 回包 + 跨节点需要的消息列表（纯逻辑，见 chat_flow.cpp）
-    const TextChatPlan plan = ProcessTextChatMsg(ctx.Request());
+    const TextChatPlan plan = ProcessTextChatMsg(ctx.Request(), actorUid);
     ctx.Response() = plan.response;
 
     // 查询redis 查找 peer_uid 对应的 server

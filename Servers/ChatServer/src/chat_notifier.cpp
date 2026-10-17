@@ -77,6 +77,8 @@ bool ChatNotifier::NotifyKickUser(const message::KickUserReq& req)
     val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
     val["reason"] = "account logged in elsewhere";
     session->SendMessage(val.toStyledString(), static_cast<uint16_t>(MSG_IDS::NOTIFY_KICK));
+    // 跨节点顶号也必须由服务端关闭旧连接，不能依赖客户端自觉断开。
+    session->CloseAfterFlush();
     LOG_WARN("[ChatNotifier] kicked user, uid:%d, sessionId:%u", req.uid(), session->GetSessionId());
     return true;
 }

@@ -81,7 +81,7 @@ graph TB
 
 | 前缀 / 键 | 含义 | 写入方 |
 |---|---|---|
-| `utoken_{uid}` | 本次登录的 token | StatusServer 颁发，ChatServer 登录时经 StatusServer 校验后删除 |
+| `utoken_{uid}` | 本次登录的 token（TTL 600 秒） | StatusServer 颁发；ChatServer 登录时在同一段 Lua 中比对并删除，一次性消费 |
 | `uinfo_{uid}` | 用户资料 JSON 缓存 | ChatServer（miss 回源 MySQL 并回填），退出删除 |
 | `userver_{uid}` | 用户所在 ChatServer 节点名（跨服路由依据） | ChatServer 登录写入，退出时校验后删除 |
 | Hash `login_count` | 各节点在线连接计数 | ChatServer 登录 +1、退出 -1、进程退出 HDel 节点 |

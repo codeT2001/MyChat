@@ -30,20 +30,37 @@ StatusLoginResult ProcessStatusLogin(int32_t uid, const std::string& token, IKey
     StatusLoginResult result;
     result.uid = uid;
     result.token = token;
-
-    const std::string tokenKey = std::string(USER_TOKEN_PREFIX) + std::to_string(uid);
-    auto tokenValue = kv.Get(tokenKey);
-    if (!tokenValue.has_value()) {
-        LOG_WARN("[StatusServer] Login failed, token not found, uid:%d", uid);
+    if (uid <= 0) {
+        LOG_WARN("[StatusServer] Login failed, invalid uid:%d", uid);
         result.error = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return result;
     }
-    if (*tokenValue != token) {
-        LOG_WARN("[StatusServer] Login failed, token mismatch, uid:%d", uid);
+    // 空 token 不能因为 Redis 中恰好存了空串而通过比对。
+    if (token.empty()) {
+        LOG_WARN("[StatusServer] Login failed, empty token, uid:%d", uid);
         result.error = static_cast<int32_t>(ErrorCodes::TOKEN_INVALID);
         return result;
     }
-    result.error = static_cast<int32_t>(ErrorCodes::SUCCESS);
+
+    const std::string tokenKey = std::string(USER_TOKEN_PREFIX) + std::to_string(uid);
+    switch (kv.CompareAndDelete(tokenKey, token)) {
+    case KvCompareDeleteResult::Deleted:
+        result.error = static_cast<int32_t>(ErrorCodes::SUCCESS);
+        return result;
+    case KvCompareDeleteResult::NotFound:
+        LOG_WARN("[StatusServer] Login failed, token not found, uid:%d", uid);
+        result.error = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return result;
+    case KvCompareDeleteResult::Mismatch:
+        LOG_WARN("[StatusServer] Login failed, token mismatch, uid:%d", uid);
+        result.error = static_cast<int32_t>(ErrorCodes::TOKEN_INVALID);
+        return result;
+    case KvCompareDeleteResult::Error:
+        LOG_ERROR("[StatusServer] Login failed, token store error, uid:%d", uid);
+        result.error = static_cast<int32_t>(ErrorCodes::RPC_FAILED);
+        return result;
+    }
+    result.error = static_cast<int32_t>(ErrorCodes::RPC_FAILED);
     return result;
 }
 

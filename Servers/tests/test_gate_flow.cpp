@@ -119,6 +119,19 @@ public:
         }
         return it->second;
     }
+    P1::KvCompareDeleteResult CompareAndDelete(
+        const std::string& key, const std::string& expected) override
+    {
+        auto it = data.find(key);
+        if (it == data.end()) {
+            return P1::KvCompareDeleteResult::NotFound;
+        }
+        if (it->second != expected) {
+            return P1::KvCompareDeleteResult::Mismatch;
+        }
+        data.erase(it);
+        return P1::KvCompareDeleteResult::Deleted;
+    }
     void HSet(const std::string&, const std::string&, const std::string&) override {}
     std::optional<std::string> HGet(const std::string&, const std::string&) override { return std::nullopt; }
     std::unordered_map<std::string, std::string> HGetAll(const std::string&) override { return {}; }

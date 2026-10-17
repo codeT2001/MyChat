@@ -15,8 +15,12 @@ constexpr uint32_t MSG_HEAD_DATA_LENGTH = 4;
 static_assert(MSG_HEAD_ID_LENGTH + MSG_HEAD_DATA_LENGTH == MSG_HEAD_TOTAL_LENGTH,
     "TCP frame header layout mismatch");
 
-// 单条消息 body 上限（2KB）：超过即视为非法帧，服务端主动断开
+// 单条客户端请求 body 上限（2KB）：超过即视为非法帧，服务端主动断开
 constexpr uint32_t MAX_MSG_LENGTH = 1024 * 2;
+
+// 服务端单条响应 body 上限（1MB）。响应可能包含好友/申请列表，
+// 因此不能复用客户端请求的 2KB 上限，但必须有明确上限避免内存放大。
+constexpr uint32_t MAX_OUTBOUND_MSG_LENGTH = 1024 * 1024;
 
 void WriteUint16BigEndian(void* dest, uint16_t value);
 uint16_t ReadUint16BigEndian(const void* src);
@@ -29,8 +33,11 @@ void EncodeMsgHead(void* dest, uint16_t msgId, uint32_t bodySize);
 // 解析帧头，拆出 msgId 与 body 长度
 void DecodeMsgHead(const void* src, uint16_t& msgId, uint32_t& bodySize);
 
-// body 长度是否在允许范围内
+// 客户端请求 body 长度是否在允许范围内
 bool IsValidMsgBodySize(uint32_t bodySize);
+
+// 服务端响应 body 长度是否在允许范围内
+bool IsValidOutboundMsgBodySize(uint32_t bodySize);
 
 } // namespace P1
 

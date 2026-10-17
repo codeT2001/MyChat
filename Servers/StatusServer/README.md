@@ -36,7 +36,7 @@ flowchart TD
     Store --> Rsp["返回 host / port / token"]
 ```
 
-> 刷新失败（Redis 异常、配置为空）时保留上一轮缓存，不用空数据覆盖；`stoi` 等异常由外层 catch 兜住，刷新线程不会中断。
+> 刷新失败（Redis 异常、配置为空）时保留上一轮缓存，不用空数据覆盖；`login_count` 脏值由 `std::from_chars` 安全解析并按缺省负载处理，单条坏数据不会拖垮整轮刷新。
 
 ## Token 校验流程（Login）
 
@@ -48,25 +48,19 @@ sequenceDiagram
     participant R as Redis
 
     CS->>S: gRPC Login(uid, token)
-    S->>R: GET utoken_uid
+    S->>R: EVAL（GET utoken_uid + 比对 + DEL，原子）
     alt key 不存在
         S-->>CS: error=8 UID_INVALID
     else token 不一致
         S-->>CS: error=9 TOKEN_INVALID
     else 一致
-        S-->>CS: error=0, uid, token
+        S-->>CS: error=0, uid, token（token 已一次性消费）
     end
 ```
 
-> ⚠️ **现状**：当前 TCP 登录链路里 ChatServer 是**直连 Redis** 读 `utoken_{uid}` 校验的
-> （见 `ChatServer/src/chat_flow.cpp` 的 `ProcessLogin`），并未调用本 RPC；
-> 且校验后**不删除** token，靠 600 秒 TTL 自然过期（重放窗口 = TTL）。
-> 本 RPC 已实现且有单测（`tests/test_status_flow.cpp`），接入与否不影响现有链路。
-
-> **token 生命周期**：`GetChatServer` 时由 `StoreLoginToken` 写入 `utoken_{uid}`（TTL `LOGIN_TOKEN_TTL_SECONDS = 600`）
-> → ChatServer TCP 登录读该键校验 → 无人主动删除，到期自动失效。刷新失败（Redis 异常、节点表为空）时保留上一轮缓存。
+> **token 一次性消费**：`GetChatServer` 写入 `utoken_{uid}`（TTL 600 秒）后，无论由 ChatServer 直连 Redis 校验，还是调用本 RPC，都会通过 Lua 原子完成 `GET + 比对 + DEL`。同一 token 在 TTL 内不能重放。
 >
-> ⚠️ 若 ChatServer 进程异常退出未及清理，旧 token 会残留在 Redis 中（此时 GateServer 侧防重复登录也会受影响，需人工 `DEL`）。**建议给 `utoken_{uid}` 加 TTL**。
+> 当前 TCP 登录链路由 ChatServer 直连 Redis 消费 token（见 `ChatServer/src/chat_flow.cpp` 的 `ProcessLogin`），未调用本 RPC；`StatusService.Login` 保留给需要显式 gRPC 校验的控制面调用，语义同样是「校验并消费」。
 
 ## 并发模型
 
@@ -98,8 +92,8 @@ Port = 50052
 cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(server_select|status_flow)' --output-on-failure
 ```
 
-- `test_server_select`（7 用例）：`PickMinServer` 选最小在线数、缺计数按 `INT_MAX>>1`、空快照返回默认节点、计数按数值比较。
-- `test_status_flow`（8 用例）：token 生成（UUID 形态/唯一）、写入带 TTL、校验（缺失/不匹配/成功/按 uid 隔离/空 token 不放行）。
+- `test_server_select`（8 用例）：`PickMinServer` 选最小在线数、缺计数按 `INT_MAX>>1`、空快照返回默认节点、计数按数值比较、脏计数不抛异常。
+- `test_status_flow`（9 用例）：token 生成（UUID 形态/唯一）、写入带 TTL、校验（缺失/不匹配/成功/按 uid 隔离/空 token 不放行/一次性消费不可重放）。
 
 > 选点与 token 逻辑都抽成了纯函数（`server_select.*` / `status_flow.*`），依赖通过 `IKeyValueStore` 注入，
 > 因此单测不需要起 Redis。

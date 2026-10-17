@@ -39,6 +39,19 @@ public:
         }
         return it->second;
     }
+    P1::KvCompareDeleteResult CompareAndDelete(
+        const std::string& key, const std::string& expected) override
+    {
+        auto it = data.find(key);
+        if (it == data.end()) {
+            return P1::KvCompareDeleteResult::NotFound;
+        }
+        if (it->second != expected) {
+            return P1::KvCompareDeleteResult::Mismatch;
+        }
+        data.erase(it);
+        return P1::KvCompareDeleteResult::Deleted;
+    }
     void HSet(const std::string&, const std::string&, const std::string&) override {}
     std::optional<std::string> HGet(const std::string&, const std::string&) override { return std::nullopt; }
     std::unordered_map<std::string, std::string> HGetAll(const std::string&) override { return {}; }
@@ -104,6 +117,15 @@ TESTFW_TEST(StatusLogin_success_echoes_uid_and_token)
     CHECK_EQ(r.error, Ec(ErrorCodes::SUCCESS));
     CHECK_EQ(r.uid, 1001);
     CHECK_EQ(r.token, std::string("tok-right"));
+    CHECK(kv.data.find(TokenKey(1001)) == kv.data.end()); // 一次性消费，禁止重放
+}
+
+TESTFW_TEST(StatusLogin_token_cannot_be_replayed)
+{
+    FakeKvStore kv;
+    P1::StoreLoginToken(1001, "tok-right", kv);
+    CHECK_EQ(P1::ProcessStatusLogin(1001, "tok-right", kv).error, Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(P1::ProcessStatusLogin(1001, "tok-right", kv).error, Ec(ErrorCodes::UID_INVALID));
 }
 
 TESTFW_TEST(StatusLogin_is_per_uid)
@@ -120,8 +142,9 @@ TESTFW_TEST(StatusLogin_empty_token_in_store_is_rejected)
 {
     // 客户端不带 token 时不应因为 Redis 里恰好是空串而放行
     FakeKvStore kv;
-    P1::StoreLoginToken(1001, "tok-right", kv);
+    P1::StoreLoginToken(1001, "", kv);
     CHECK_EQ(P1::ProcessStatusLogin(1001, "", kv).error, Ec(ErrorCodes::TOKEN_INVALID));
+    CHECK(kv.data.find(TokenKey(1001)) != kv.data.end()); // 空 token 不消费有效键
 }
 
 } // namespace

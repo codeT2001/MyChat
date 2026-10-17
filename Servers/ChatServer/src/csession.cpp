@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 
 #include "chat/log.h"
@@ -13,7 +14,7 @@ constexpr uint32_t MAX_SENDQUEUE_SIZE = 2000;
 } // namespace
 
 CSession::CSession(std::shared_ptr<boost::asio::io_context> ioc, uint32_t id)
-    : socket_(ioc->get_executor()), isClose_(false), sessionId_(id), userId_(0)
+    : socket_(ioc->get_executor()), isClose_(false), closeAfterWrite_(false), sessionId_(id), userId_(0)
 {}
 
 void CSession::InitSocketOptions()
@@ -75,8 +76,8 @@ void CSession::ReadMessageHead(const boost::system::error_code& ec, std::size_t 
         return;
     }
 
-    msgBodyNode_ = std::make_shared<MsgNode>(static_cast<uint16_t>(bodySize), msgId);
-    msgBodyNode_->SetCurLen(static_cast<uint16_t>(bodySize));
+    msgBodyNode_ = std::make_shared<MsgNode>(bodySize, msgId);
+    msgBodyNode_->SetCurLen(bodySize);
     ReadMessageBody(bodySize);
 }
 
@@ -136,32 +137,45 @@ void CSession::Close()
     OnDisconnected();
 }
 
-void CSession::SendMessage(const char* data, size_t len, uint16_t msgId)
+bool CSession::SendMessage(const char* data, size_t len, uint16_t msgId)
 {
-    if (isClose_.load()) {
-        return;
+    if (isClose_.load() || closeAfterWrite_.load()) {
+        return false;
+    }
+    if (len > MAX_OUTBOUND_MSG_LENGTH) {
+        LOG_ERROR("[Session] outbound message too large, sessionId:%u, msgId:%u, len:%zu",
+            sessionId_, msgId, len);
+        ScheduleClose();
+        return false;
+    }
+    if (len > 0 && data == nullptr) {
+        LOG_ERROR("[Session] outbound message has null data, sessionId:%u, msgId:%u, len:%zu",
+            sessionId_, msgId, len);
+        ScheduleClose();
+        return false;
     }
 
-    auto msgNode = std::make_shared<MsgNode>(len + MSG_HEAD_TOTAL_LENGTH, msgId);
+    auto msgNode = std::make_shared<MsgNode>(
+        static_cast<uint32_t>(len) + MSG_HEAD_TOTAL_LENGTH, msgId);
 
     EncodeMsgHead(msgNode->GetData(), msgId, static_cast<uint32_t>(len));
 
-    if (len > 0 && data != nullptr) {
+    if (len > 0) {
         memcpy(msgNode->GetData() + MSG_HEAD_TOTAL_LENGTH, data, len);
     }
-    msgNode->SetCurLen(len + MSG_HEAD_TOTAL_LENGTH);
+    msgNode->SetCurLen(static_cast<uint32_t>(len) + MSG_HEAD_TOTAL_LENGTH);
     LOG_DEBUG("[Session] send, sessionId:%u, msgId:%u, len:%u", sessionId_, msgId, msgNode->GetCurLen());
     bool needStartWrite = false;
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
 
-        if (isClose_.load()) {
-            return;
+        if (isClose_.load() || closeAfterWrite_.load()) {
+            return false;
         }
 
         if (sendQueue_.size() >= MAX_SENDQUEUE_SIZE) {
             LOG_WARN("[Session] send queue full, message dropped, sessionId:%u, msgId:%u", sessionId_, msgId);
-            return;
+            return false;
         }
 
         sendQueue_.push(msgNode);
@@ -171,11 +185,42 @@ void CSession::SendMessage(const char* data, size_t len, uint16_t msgId)
     if (needStartWrite) {
         DoWrite();
     }
+    return true;
 }
 
-void CSession::SendMessage(const std::string& msg, short msgId)
+bool CSession::SendMessage(const std::string& msg, uint16_t msgId)
 {
-    SendMessage(msg.data(), msg.length(), static_cast<uint16_t>(msgId));
+    return SendMessage(msg.data(), msg.length(), msgId);
+}
+
+void CSession::CloseAfterFlush()
+{
+    if (isClose_.load()) {
+        return;
+    }
+    closeAfterWrite_.store(true);
+    auto self = shared_from_this();
+    boost::asio::post(socket_.get_executor(), [self]() { self->TryCloseAfterFlush(); });
+}
+
+void CSession::TryCloseAfterFlush()
+{
+    if (isClose_.load() || !closeAfterWrite_.load()) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(sendMtx_);
+        if (!sendQueue_.empty()) {
+            return;
+        }
+    }
+    Close();
+}
+
+void CSession::ScheduleClose()
+{
+    auto self = shared_from_this();
+    boost::asio::post(socket_.get_executor(), [self]() { self->Close(); });
 }
 
 void CSession::DoWrite()
@@ -209,6 +254,7 @@ void CSession::HandleWrite(const boost::system::error_code& ec)
     }
 
     bool needStartNext = false;
+    bool needClose = false;
     {
         std::lock_guard<std::mutex> lock(sendMtx_);
 
@@ -220,8 +266,13 @@ void CSession::HandleWrite(const boost::system::error_code& ec)
             sendQueue_.pop();
             needStartNext = !sendQueue_.empty();
         }
+        needClose = closeAfterWrite_.load() && sendQueue_.empty();
     }
 
+    if (needClose) {
+        Close();
+        return;
+    }
     if (needStartNext) {
         DoWrite();
     }
