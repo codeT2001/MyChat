@@ -2,9 +2,11 @@
 
 #include "chat_flow.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
+#include "business_worker.h"
 #include "chat/constants.h"
 #include "chat/log.h"
 #include "jsoncpp/json/json.h"
@@ -21,6 +23,10 @@ using message::FriendAcceptedReq;
 using message::KickUserReq;
 using message::TextChatMsgReq;
 namespace {
+constexpr int32_t DEFAULT_BUSINESS_WORKERS = 4;
+constexpr int32_t MAX_BUSINESS_WORKERS = 32;
+constexpr int32_t DEFAULT_MAX_PENDING_PER_WORKER = 4096;
+
 // 查目标用户所在节点；不在线返回空
 std::optional<std::string> GetPeerServer(int32_t uid)
 {
@@ -28,10 +34,15 @@ std::optional<std::string> GetPeerServer(int32_t uid)
 }
 
 // 目标用户是否在本节点（AddFriend/AuthFriend/TextChatMsg 三处共用的路由判断）
-bool IsPeerLocal(const std::optional<std::string> &peerServer)
+bool IsPeerLocal(const std::optional<std::string> &peerServer, const std::string& selfServerName)
 {
     return peerServer.has_value() &&
-        *peerServer == ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
+        *peerServer == selfServerName;
+}
+
+bool IsCurrentSession(int32_t uid, const std::shared_ptr<CSession>& session)
+{
+    return UserManager::GetInstance().GetSession(uid) == session;
 }
 
 // Handler 公共骨架：解析请求体，并在作用域结束时按 rspId 统一回包。
@@ -61,45 +72,96 @@ private:
     Json::Value response_;
 };
 } // namespace
+
+struct LogicSystem::BusinessWorker {
+    std::mutex mtx;
+    std::condition_variable cv;
+    std::queue<std::shared_ptr<LogicNode>> queue;
+};
+
 LogicSystem::LogicSystem() : stop_(false)
 {
     // 绑定生产实现（当前仅搜索用户流程使用，后续逐步迁移到 ChatDependencies）
     deps_.user_store = &MysqlManager::GetInstance();
     deps_.kv_store = &RedisManagerPool::GetInstance();
     RegisterHandleCallback();
-    worker_ = std::thread(&LogicSystem::DealMessage, this);
+
+    auto& cfg = ConfigManager::GetInstance();
+    selfServerName_ = cfg.GetValue<std::string>("SelfServer", "Name", "");
+    int32_t workerCount = cfg.GetValue<int32_t>("Business", "WorkerThreads", DEFAULT_BUSINESS_WORKERS);
+    workerCount = std::clamp(workerCount, 1, MAX_BUSINESS_WORKERS);
+    const int32_t maxPending = cfg.GetValue<int32_t>(
+        "Business", "MaxPendingPerWorker", DEFAULT_MAX_PENDING_PER_WORKER);
+    maxPendingPerWorker_ = static_cast<std::size_t>(std::max(maxPending, 1));
+
+    workers_.reserve(static_cast<std::size_t>(workerCount));
+    workerThreads_.reserve(static_cast<std::size_t>(workerCount));
+    for (int32_t i = 0; i < workerCount; ++i) {
+        workers_.push_back(std::make_unique<BusinessWorker>());
+    }
+    for (std::size_t i = 0; i < workers_.size(); ++i) {
+        workerThreads_.emplace_back(&LogicSystem::DealMessage, this, i);
+    }
+    LOG_INFO("[LogicSystem] business workers started, count:%d, maxPendingPerWorker:%zu",
+        workerCount, maxPendingPerWorker_);
 }
 LogicSystem::~LogicSystem()
 {
-    stop_ = true;
-    cond_.notify_one();
-    worker_.join();
+    stop_.store(true);
+    for (auto& worker : workers_) {
+        worker->cv.notify_all();
+    }
+    for (auto& thread : workerThreads_) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
 }
 void LogicSystem::PostMsgToQue(std::shared_ptr<LogicNode> node)
 {
-    {
-        std::lock_guard<std::mutex> lock(msgMtx_);
-        msgQue_.push(node);
-        LOG_INFO("[LogicSystem] recv, msgId:%u, len:%u", node->msgNode_->GetMsgId(), node->msgNode_->GetCurLen());
+    if (!node || !node->session_ || !node->msgNode_ || stop_.load() || workers_.empty()) {
+        return;
     }
-    cond_.notify_one();
+    BusinessWorker& worker = *workers_[SelectBusinessWorker(
+        node->session_->GetSessionId(), workers_.size())];
+    bool overloaded = false;
+    {
+        std::lock_guard<std::mutex> lock(worker.mtx);
+        if (worker.queue.size() >= maxPendingPerWorker_) {
+            overloaded = true;
+        } else {
+            worker.queue.push(node);
+        }
+    }
+    if (overloaded) {
+        LOG_ERROR("[LogicSystem] business queue full, closing session, sessionId:%u, msgId:%u",
+            node->session_->GetSessionId(), node->msgNode_->GetMsgId());
+        node->session_->CloseAfterFlush();
+        return;
+    }
+    // 日志放在锁外，避免慢日志放大队列锁竞争
+    LOG_INFO("[LogicSystem] recv, msgId:%u, len:%u", node->msgNode_->GetMsgId(), node->msgNode_->GetCurLen());
+    worker.cv.notify_one();
 }
 
-void LogicSystem::DealMessage()
+void LogicSystem::DealMessage(std::size_t workerIndex)
 {
+    BusinessWorker& worker = *workers_[workerIndex];
     while (true) {
         std::shared_ptr<LogicNode> node;
         {
-            std::unique_lock<std::mutex> lock(msgMtx_);
-            cond_.wait(lock, [this]() { return stop_ || !msgQue_.empty(); });
-            if (stop_ && msgQue_.empty()) {
+            std::unique_lock<std::mutex> lock(worker.mtx);
+            worker.cv.wait(lock, [this, &worker]() {
+                return stop_.load() || !worker.queue.empty();
+            });
+            if (stop_.load() && worker.queue.empty()) {
                 break;
             }
-            if (msgQue_.empty()) {
+            if (worker.queue.empty()) {
                 continue;
             }
-            node = msgQue_.front();
-            msgQue_.pop();
+            node = std::move(worker.queue.front());
+            worker.queue.pop();
         }
         // 消息处理放在锁外：慢 handler（DB/RPC）不再阻塞新消息入队
         try {
@@ -155,8 +217,11 @@ void LogicSystem::HandleLogin(std::shared_ptr<CSession> session, const uint16_t 
     }
 
     const int32_t uid = login.uid;
+    // 同一 uid 的登录绑定必须与断线清理串行；不同 uid 可并行。
+    // ctx 在函数末尾析构回包，此时锁已释放（锁对象晚于 ctx 构造、先于 ctx 析构）。
+    std::lock_guard<std::mutex> uidLock(UserManager::GetInstance().GetUidLock(uid));
     const std::string uid_str = std::to_string(uid);
-    auto serverName = ConfigManager::GetInstance().GetValue<std::string>("SelfServer", "Name");
+    const std::string& serverName = selfServerName_;
     // 顶号：先取旧路由与同节点旧会话（必须在覆盖路由键、重绑会话之前）。
     auto oldServer = RedisManagerPool::GetInstance().Get(USER_SERVER_PREFIX + uid_str);
     auto oldLocalSession = UserManager::GetInstance().GetSession(uid);
@@ -251,6 +316,13 @@ void LogicSystem::HandleSearchUser(std::shared_ptr<CSession> session, const uint
         ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return;
     }
+    std::lock_guard<std::mutex> uidLock(UserManager::GetInstance().GetUidLock(actorUid));
+    if (!IsCurrentSession(actorUid, session)) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] SearchUser rejected, stale session, uid:%d, sessionId:%u",
+            actorUid, session->GetSessionId());
+        return;
+    }
     ctx.Response() = ProcessSearchUser(ctx.Request(), deps_);
 }
 
@@ -264,6 +336,13 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
         ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return;
     }
+    std::lock_guard<std::mutex> uidLock(UserManager::GetInstance().GetUidLock(actorUid));
+    if (!IsCurrentSession(actorUid, session)) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] AddFriend rejected, stale session, uid:%d, sessionId:%u",
+            actorUid, session->GetSessionId());
+        return;
+    }
     // 落库 + 回包 + 本地通知内容（纯逻辑，见 chat_flow.cpp）
     const AddFriendPlan plan = ProcessAddFriend(ctx.Request(), actorUid, deps_);
     ctx.Response() = plan.response;
@@ -273,7 +352,7 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
         LOG_INFO("[LogicSystem] HandleAddFriend, to_uid:%d offline", plan.toUid);
         return;
     }
-    if (IsPeerLocal(to_server)) {
+    if (IsPeerLocal(to_server, selfServerName_)) {
         auto psession = UserManager::GetInstance().GetSession(plan.toUid);
         if (!psession) {
             LOG_WARN("[LogicSystem] HandleAddFriend, to_uid:%d session not found", plan.toUid);
@@ -313,6 +392,13 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
         ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return;
     }
+    std::lock_guard<std::mutex> uidLock(UserManager::GetInstance().GetUidLock(actorUid));
+    if (!IsCurrentSession(actorUid, session)) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] AuthFriend rejected, stale session, uid:%d, sessionId:%u",
+            actorUid, session->GetSessionId());
+        return;
+    }
     // 校验 action → 更新申请状态 →（同意时）建立好友关系（纯逻辑，见 chat_flow.cpp）
     const AuthFriendPlan plan = ProcessAuthFriend(ctx.Request(), actorUid, deps_);
     ctx.Response() = plan.response;
@@ -334,7 +420,7 @@ void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t a
         return;
     }
 
-    if (IsPeerLocal(peer_server)) {
+    if (IsPeerLocal(peer_server, selfServerName_)) {
         auto psession = UserManager::GetInstance().GetSession(peer_uid);
         if (!psession) {
             LOG_WARN("[LogicSystem] NotifyAuthResult, peer_uid:%d session not found", peer_uid);
@@ -365,6 +451,13 @@ void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uin
         ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
         return;
     }
+    std::lock_guard<std::mutex> uidLock(UserManager::GetInstance().GetUidLock(actorUid));
+    if (!IsCurrentSession(actorUid, session)) {
+        ctx.Response()["error"] = static_cast<int32_t>(ErrorCodes::USER_ALREADY_LOGIN);
+        LOG_WARN("[LogicSystem] TextChatMsg rejected, stale session, uid:%d, sessionId:%u",
+            actorUid, session->GetSessionId());
+        return;
+    }
     // 回包 + 跨节点需要的消息列表（纯逻辑，见 chat_flow.cpp）
     const TextChatPlan plan = ProcessTextChatMsg(ctx.Request(), actorUid);
     ctx.Response() = plan.response;
@@ -376,7 +469,7 @@ void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uin
     }
 
     // 对方在本节点：直接通知
-    if (IsPeerLocal(peer_server)) {
+    if (IsPeerLocal(peer_server, selfServerName_)) {
         auto psession = UserManager::GetInstance().GetSession(plan.toUid);
         if (psession) {
             psession->SendMessage(plan.response.toStyledString(),

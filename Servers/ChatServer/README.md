@@ -9,12 +9,12 @@
 ## 核心功能
 
 - **TCP 连接管理**：基于 Boost.Asio 多 io_context 线程池 accept，每个连接一个 `CSession`
-- **单线程业务队列**：收包反序列化成 `MsgNode` 投递到 `LogicSystem` 队列，由独立逻辑线程串行处理（业务无锁）
+- **分片业务线程池**：收包反序列化成 `MsgNode` 后按 `sessionId` 固定分片到 `[Business] WorkerThreads` 个 worker；同一连接严格有序，不同连接并行处理
 - **登录二次校验**：GateServer 颁发的 token 在 TCP 建连后由 ChatServer 直连 Redis，通过 Lua 原子完成「读取 + 比对 + 删除」，同一 token 只能成功登录一次
 - **好友系统**：搜索用户、申请、同意（action=1）/拒绝（action=2）；拒绝后对方重新申请自动复位为待处理
 - **文本聊天**：`text_array` 批量承载多条文本（每条带客户端生成的 msg_id），同服直接推 session，跨服写入目标节点的 `chat:push:{node}` Stream
 - **可靠的跨节点事件投递**：Redis Stream consumer group + `XACK` + `XPENDING/XCLAIM` 重试 + 去重键 + 死信流，至少一次投递
-- **统一回包与异常兜底**：各 Handler 用 `HandlerContext`（RAII 骨架）保证任何分支都回包，单条消息异常不会杀死逻辑线程
+- **统一回包与异常兜底**：各 Handler 用 `HandlerContext`（RAII 骨架）保证任何分支都回包，单条消息异常不会杀死 worker
 
 ## 架构组成
 
@@ -24,7 +24,7 @@
 | CSession | 客户端会话：异步读 6 字节包头 → 读 JSON 体 → 投队列；发送队列 + 异步写 |
 | MsgCodec | `msg_codec.*`：TCP 帧头编解码（大端）、body 长度上限校验（纯函数，有单测） |
 | MsgNode | 收包节点（含 msgId、当前长度、扩容逻辑） |
-| LogicSystem | 消息分发骨架：注册 `handleFuncs_`（msgId → Handler），单线程消费队列；Handler 只做解析与回包 |
+| LogicSystem | 消息分发骨架：注册 `handleFuncs_`（msgId → Handler），按 session 分片到多 worker 消费；同一 uid 的登录绑定/断开清理/业务处理用分片锁串行 |
 | ChatFlow | `chat_flow.*`：可单测的纯业务函数（搜人 / 资料加载 / 登录 / 加好友 / 认证 / 文本消息 / 跨节点通知 JSON） |
 | UserManager | 内存中 uid → shared_ptr\<CSession\> 映射，用 `common` 的 `SessionRegistry` 模板（互斥保护） |
 | ChatNotifier | 跨节点通知的统一落地逻辑：查本机会话并组装 JSON 推给客户端；gRPC 服务端与 Stream 消费者共用 |
@@ -33,7 +33,7 @@
 | ChatEventBus | Stream 发布端：`XADD chat:push:{target}`，payload 为 protobuf 二进制，并维护流长度与 TTL |
 | ChatEventConsumer | Stream 消费端：consumer group 消费、ACK、pending 回收、幂等去重、过期丢弃与死信写入 |
 | ChatMessageRouter | 跨节点通知统一出口：按 `[Cluster] NotifyTransport` 选择 Stream 或 gRPC，两种方式都经 `RpcDispatcher` 异步执行 |
-| RpcDispatcher | 把跨节点通知从 LogicSystem 单业务线程移到固定 worker；同一目标节点固定同一 worker，保证本节点到该对端的投递顺序 |
+| RpcDispatcher | 把跨节点通知从业务 worker 移到固定派发 worker；同一目标节点固定同一 worker，保证本节点到该对端的投递顺序 |
 
 ## 内部处理流程
 
@@ -45,7 +45,7 @@ flowchart TD
     CHK -- 是 --> CLOSE[拒绝并关闭连接]
     CHK -- 否 --> B[按 len 异步读 JSON body]
     B --> N[构造 MsgNode 入 LogicSystem 队列]
-    N --> W[逻辑线程被唤醒]
+    N --> W[按 sessionId 分片到业务 worker]
     W --> HF{"msgId 有注册 Handler?"}
     HF -- 否 --> DROP[记录日志并丢弃]
     HF -- 是 --> EX[包裹 try/catch 执行 Handler]
@@ -260,6 +260,10 @@ StreamMaxDeliveryAttempts = 5
 StreamMaxEventAgeSeconds = 300 # 节点长时间离线后丢弃过旧事件；0 表示不限制
 DedupTtlSeconds = 600
 
+[Business]
+WorkerThreads = 4          # 业务 worker 数；同一 session 固定落到同一 worker
+MaxPendingPerWorker = 4096 # 单 worker 队列上限；满队列时关闭对应连接
+
 [RPC]
 DeadlineMs = 500
 WorkerThreads = 2
@@ -278,7 +282,9 @@ MaxPendingPerWorker = 4096
 
 ## 开发者注意
 
-- Handler 全跑在**同一逻辑线程**，禁止长时间阻塞；跨节点通知通过 `ChatMessageRouter` 投递到 `RpcDispatcher`，Stream 的 `XADD` 与 gRPC 调用都不在业务线程执行
+- Handler 按 `sessionId` 分片到 `[Business] WorkerThreads` 个 worker，同一连接消息保持有序；不同连接并行。跨节点通知仍经 `ChatMessageRouter` 投递到 `RpcDispatcher`，Stream 的 `XADD` 与 gRPC 调用不在业务 worker 执行
+- 同一 uid 的登录绑定、业务 Handler 与断开清理共用 `UserManager::GetUidLock()`；新增跨会话共享状态时必须遵守 `uid lock → SessionRegistry` 的加锁顺序
+- `[MySQL] PoolMaxSize` 应不小于业务 worker 数 + 1（默认 5，建议 4 个 worker 时调到 8）；Redis 连接池也需同步评估
 - gRPC 直连模式设置 `[RPC] DeadlineMs`，单个对端卡住不会拖住业务队列；派发队列满时会丢弃通知并记录错误日志
 - Stream 模式是**至少一次投递**：消费成功才 `XACK`，失败保留 pending 并由 `XCLAIM` 重试；超过 `StreamMaxDeliveryAttempts` 或 payload 非法时进入 `chat:dead:{node}`
 - 客户端回包仍是**本节点即时返回**：Stream 只保证事件异步送达目标节点，不代表目标客户端已收到；需要强同步结果的控制面请求继续走 gRPC
@@ -294,10 +300,10 @@ MaxPendingPerWorker = 4096
 ## 单元测试
 
 ```bash
-cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(chat_flow|msg_codec|session_registry|msg_node|node_info|rpc_dispatch|chat_event)' --output-on-failure
+cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(chat_flow|msg_codec|session_registry|msg_node|node_info|rpc_dispatch|business_worker|chat_event)' --output-on-failure
 ```
 
 无关 MySQL / Redis / 网络：业务判定在 `chat_flow.*` 里以纯函数实现，依赖经 `ChatDependencies`
 （`IUserStore` / `IKeyValueStore`）注入，测试用内存 fake 顶替。当前覆盖搜人、资料加载（缓存优先 + 回填且不写 pwd）、
 登录、加好友申请、认证（含 action 非法/资料缺失/落库失败）、文本消息、跨节点通知 JSON、TCP 帧头字节序、
-uid→会话表（顶号）语义。
+uid→会话表（顶号）语义、业务 worker 分片稳定性。

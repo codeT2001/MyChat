@@ -66,6 +66,9 @@ void CServer::RemoveSession(uint32_t sessionId)
     if (uid == 0) {
         return;
     }
+    // 与 HandleLogin 的绑定流程使用同一把 uid 锁，避免登录与断开清理交叉更新。
+    std::lock_guard<std::mutex> uidLock(
+        UserManager::GetInstance().GetUidLock(static_cast<int32_t>(uid)));
     // 只有当前生效的会话断开才清理 Redis；被新登录顶掉的旧会话不能清
     if (!UserManager::GetInstance().RmvUserSession(uid, session)) {
         return;

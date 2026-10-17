@@ -25,7 +25,7 @@ inline std::size_t SelectRpcWorker(const std::string& key, std::size_t workerCou
     return std::hash<std::string> {}(key) % workerCount;
 }
 
-// 跨节点 gRPC 派发器：把同步 RPC 从 LogicSystem 单业务线程移到固定 worker 上，
+// 跨节点 gRPC 派发器：把同步 RPC 从 LogicSystem 业务 worker 移到固定派发 worker 上，
 // 避免某个对端卡住时拖住本节点所有业务消息。队列满时丢弃并记录日志，
 // 保持 fire-and-forget 语义（客户端 ACK 仍然由本地 Handler 立即返回）。
 class RpcDispatcher {

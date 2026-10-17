@@ -202,18 +202,19 @@ cd VerifyServer && npm install && npm test   # Node.js 侧，用内置 test runn
 | `test_protocol_constants` | `common/include/chat/constants.h` | 3 | `MSG_IDS` / `ErrorCodes` 数值契约 |
 | `test_config_manager` | `common/src/config_manager.cpp` | 2 | INI 解析与默认值回退 |
 | `test_gate_flow` | `GateServer/src/gate_flow.cpp` | 12 | 验证码 / 注册 / 重置 / 登录成功与失败分支 |
-| `test_chat_flow` | `ChatServer/src/chat_flow.cpp` | 39 | 搜人、资料加载（缓存+回落）、登录、加好友、认证、文本消息、跨节点通知 JSON |
-| `test_server_select` | `StatusServer/src/server_select.cpp` | 7 | 最小在线数选点、缺计数默认值 |
-| `test_status_flow` | `StatusServer/src/status_flow.cpp` | 8 | token 生成 / TTL 写入 / 校验 |
+| `test_chat_flow` | `ChatServer/src/chat_flow.cpp` | 46 | 搜人、资料加载（缓存+回落）、登录、加好友、认证、文本消息、跨节点通知 JSON |
+| `test_server_select` | `StatusServer/src/server_select.cpp` | 8 | 最小在线数选点、缺计数默认值、脏计数容错 |
+| `test_status_flow` | `StatusServer/src/status_flow.cpp` | 9 | token 生成 / TTL 写入 / 一次性消费校验 |
 | `test_msg_codec` | `ChatServer/src/msg_codec.cpp` | 7 | TCP 帧头大端字节序（与客户端 QDataStream 对齐） |
 | `test_http_params` | `GateServer/src/http_params.cpp` | 8 | URL 解码（含畸形转义）、查询串解析 |
 | `test_session_registry` | `common/include/chat/session_registry.h` | 7 | uid→会话绑定、顶号语义（旧会话不得删新绑定） |
 | `test_node_info` | `common/src/node_info.cpp` | 6 | 节点注册信息编解码、旧字段兼容、endpoint 拼接 |
 | `test_rpc_dispatch` | `ChatServer/src/rpc_dispatcher` | 3 | 固定 key 落同一 worker、队列上限、停止语义 |
+| `test_business_worker` | `ChatServer/src/business_worker.h` | 3 | 同一 session 固定分片、worker 数为 0/1 的退化边界 |
 | `test_chat_event` | `ChatServer/src/chat_event.cpp` | 2 | 跨节点事件类型名称与解析的往返/非法值 |
 | `VerifyServer/test` | `verify-code.js` / `constants.js` / 配置模板 | 8 | 验证码逻辑、**错误码与 C++ 逐项同值**、配置模板自检 |
 
-合计 **14 个 C++ 测试（114 用例）+ 3 个 Node 测试文件**。
+合计 **15 个 C++ 测试（126 用例）+ 3 个 Node 测试文件**。
 
 > 尚未覆盖的是纯 I/O 层：`mysql_dao` / `redis_manager` / `chat_event_bus` / `chat_event_consumer` / `csession` 收发 / gRPC 客户端，
 > 需要真实依赖或容器化环境。新增用例的方式见 [AGENTS.md](AGENTS.md#测试)。

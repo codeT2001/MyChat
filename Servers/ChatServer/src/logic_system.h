@@ -2,13 +2,17 @@
 #define _P1_LOGIC_SYSTEM_H_
 
 #include <boost/asio.hpp>
+#include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
 #include <queue>
+#include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 #include "chat/constants.h"
 #include "csession.h"
 #include "chat/noncopyable.h"
@@ -32,7 +36,9 @@ public:
     void SetDependencies(const ChatDependencies& deps) { deps_ = deps; }
 
 private:
-    void DealMessage();
+    struct BusinessWorker;
+
+    void DealMessage(std::size_t workerIndex);
     void ProcessMessage(std::shared_ptr<LogicNode> node);
 
     void RegisterHandleCallback();
@@ -51,11 +57,11 @@ private:
     void NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action,
         const Json::Value& notify);
     LogicSystem();
-    std::queue<std::shared_ptr<LogicNode>> msgQue_;
-    std::mutex msgMtx_;
-    std::condition_variable cond_;
-    std::thread worker_;
-    bool stop_;
+    std::vector<std::unique_ptr<BusinessWorker>> workers_;
+    std::vector<std::thread> workerThreads_;
+    std::atomic<bool> stop_;
+    std::size_t maxPendingPerWorker_ = 4096;
+    std::string selfServerName_;
     std::unordered_map<MSG_IDS, handleFunc> handleFuncs_;
     ChatDependencies deps_;
 };

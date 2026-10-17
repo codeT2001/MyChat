@@ -283,7 +283,7 @@ sequenceDiagram
 | 节点配置 | 每个节点维护其他节点地址，O(N²) 条目 | 只配置自身信息；对端通过节点名与 Redis 发现 |
 | 拓扑 | 逻辑全连接，N×(N-1) 条调用关系 | N 条事件流，任意节点按目标名发布 |
 | 传输方式 | 同步 gRPC 请求-响应 | 异步 `XADD` / consumer group 消费；gRPC 可显式直连 |
-| 业务线程 | 早期直接阻塞；后改为派发 worker | 只投递到派发队列，`XADD` 与 gRPC 都在 worker 执行 |
+| 业务线程 | 早期直接阻塞；后改为派发 worker | 业务 worker 只投递到派发队列，`XADD` 与 gRPC 都在派发 worker 执行 |
 | 客户端响应 | 本节点处理完即返回 | 不变，仍由本节点 Handler 立即返回 |
 | 投递可靠性 | 调用失败通常只记日志 | 至少一次：ACK、pending、reclaim、死信、去重 |
 | 目标节点重启 | 重启窗口内通知失败 | 事件保留在 Stream，恢复后继续消费（TTL 内） |
@@ -419,6 +419,8 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 | `[RPC] DeadlineMs` | 500 | gRPC 直连路径的超时 |
 | `[RPC] WorkerThreads` | 2 | 派发 worker 数 |
 | `[RPC] MaxPendingPerWorker` | 4096 | 每个 worker 的队列上限，满队列丢弃并记日志 |
+| `[Business] WorkerThreads` | 4 | 业务 worker 数；同一 session 固定同一 worker |
+| `[Business] MaxPendingPerWorker` | 4096 | 每个业务 worker 的队列上限，满队列关闭连接 |
 
 ### 8.3 常见现象
 

@@ -49,6 +49,10 @@ StreamMaxDeliveryAttempts = 5
 StreamMaxEventAgeSeconds = 300
 DedupTtlSeconds = 600
 
+[Business]
+WorkerThreads = 4
+MaxPendingPerWorker = 4096
+
 [RPC]
 DeadlineMs = 500
 WorkerThreads = 2

@@ -9,7 +9,7 @@
 namespace P1 {
 
 // 跨节点通知的统一出口：按 [Cluster] NotifyTransport 选择 Redis Stream 或直连 gRPC。
-// 两种方式都投递到 RpcDispatcher，避免阻塞 LogicSystem 单业务线程。
+// 两种方式都投递到 RpcDispatcher，避免阻塞 LogicSystem 业务 worker。
 class ChatMessageRouter {
 public:
     static ChatMessageRouter& GetInstance();

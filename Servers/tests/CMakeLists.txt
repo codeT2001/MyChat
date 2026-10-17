@@ -114,6 +114,11 @@ target_include_directories(test_rpc_dispatch PRIVATE
     ${REPO_SERVER_DIR}/common/include
     ${REPO_SERVER_DIR}/ChatServer/src)
 
+# 业务线程分片：同一 session 固定落到同一 worker
+chat_add_test(test_business_worker
+    ${TEST_SRC_DIR}/test_business_worker.cpp)
+target_include_directories(test_business_worker PRIVATE ${REPO_SERVER_DIR}/ChatServer/src)
+
 # 跨节点事件类型名称映射
 chat_add_test(test_chat_event
     ${TEST_SRC_DIR}/test_chat_event.cpp
