@@ -33,6 +33,8 @@ private:
 	void StopCacheRefresher();
     void RefreshCache();
 	ChatServer GetChatServer();
+	// 配置中的节点表仅作为 Redis 注册表为空时的兜底。
+	std::unordered_map<std::string, ChatServer> configServers_;
 	std::unordered_map<std::string, ChatServer> servers_;
 	mutable std::shared_mutex rwMtx_;
 	std::thread refreshThread_;

@@ -97,3 +97,23 @@ target_include_directories(test_http_params PRIVATE ${REPO_SERVER_DIR}/GateServe
 chat_add_test(test_session_registry
     ${TEST_SRC_DIR}/test_session_registry.cpp)
 target_include_directories(test_session_registry PRIVATE ${REPO_SERVER_DIR}/common/include)
+
+# 节点注册信息编解码（纯逻辑，不访问 Redis）
+chat_add_test(test_node_info
+    ${TEST_SRC_DIR}/test_node_info.cpp
+    ${REPO_SERVER_DIR}/common/src/node_info.cpp)
+target_include_directories(test_node_info PRIVATE ${REPO_SERVER_DIR}/common/include)
+target_link_libraries(test_node_info PRIVATE ${JSONCPP_LIB})
+
+# 跨节点 RPC 派发策略（同一目标固定同一 worker）
+chat_add_test(test_rpc_dispatch
+    ${TEST_SRC_DIR}/test_rpc_dispatch.cpp)
+target_include_directories(test_rpc_dispatch PRIVATE
+    ${REPO_SERVER_DIR}/common/include
+    ${REPO_SERVER_DIR}/ChatServer/src)
+
+# 跨节点事件类型名称映射
+chat_add_test(test_chat_event
+    ${TEST_SRC_DIR}/test_chat_event.cpp
+    ${REPO_SERVER_DIR}/ChatServer/src/chat_event.cpp)
+target_include_directories(test_chat_event PRIVATE ${REPO_SERVER_DIR}/ChatServer/src)

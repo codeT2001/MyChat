@@ -8,7 +8,7 @@
 
 | 依赖 | 版本要求 | 用途 |
 |---|---|---|
-| Redis | 5.0+ | token / 验证码 / 用户资料缓存 / 路由 / 在线计数 |
+| Redis | 5.0+ | token / 验证码 / 用户资料缓存 / 路由 / 在线计数 / 节点注册 / Stream 事件总线 |
 | MySQL | 5.7+（建议 8.x，端口 3306） | 用户、好友申请、好友关系持久化 |
 | Node.js + npm | 14+ | VerifyServer 邮件验证码服务 |
 | CMake | **3.20+** | C++ 服务构建 |
@@ -160,7 +160,14 @@ curl -X POST http://127.0.0.1:9090/getVerifyCode \
 
 # ③ 全部端口在听
 ss -ltnp | grep -E ':(9090|50051|50052|50061|50062|50081|50082|6379|3306)'
+
+# ④ 节点注册与事件流（ChatServer 启动后）
+redis-cli SMEMBERS chat:nodes
+redis-cli GET chat:node:ChatServer1
+redis-cli XINFO GROUPS chat:push:ChatServer1
 ```
+
+> `XINFO GROUPS chat:push:ChatServer1` 应看到 group 名 `ChatServer1`。`lag` 长期不下降说明消费端异常，`pending` 持续增长可结合 `XPENDING` 排查。
 
 ### 日志
 
@@ -174,6 +181,8 @@ ss -ltnp | grep -E ':(9090|50051|50052|50061|50062|50081|50082|6379|3306)'
 | 获取验证码失败 | 查 `verify_server.log`：QQ 邮箱授权码是否过期、SMTP 是否被限流；Redis `code_{email}` 是否已有值 |
 | GateServer 启动即退出 | 9090 端口占用，或 [GateServer/config.ini](GateServer/config.ini) 中 MySQL/Redis 配置不可达 |
 | ChatServer 停止慢 | 正常的优雅退出（清 Redis、停 I/O 池、关 gRPC），`stop.sh` 有 60 秒宽限，超时才 SIGKILL |
+| 跨服通知延迟或丢失 | 查 `redis-cli XINFO GROUPS chat:push:{节点名}` 的 `lag/pending`；确认 `NotifyTransport=stream` 且目标节点 consumer 已启动；紧急回滚可把相关节点切到 `grpc` |
+| 事件持续重试 | `redis-cli XPENDING chat:push:{节点名}` 查看 idle/delivery；检查 `chat:dead:{节点名}` 与目标节点日志（payload 非法、处理异常） |
 | 配置加载失败 | 可执行文件与 `config.ini` 必须同目录（`build/<server>/`） |
 
 > 基础组件自测：`redis-cli ping`；`source .env && mysql -h"${MYSQL_HOST:-127.0.0.1}" -P"${MYSQL_PORT:-3306}" -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" chat_db -e "SELECT 1"`。通用问题（构建、端口、`user_id` 表等）见 [README.md](README.md#故障排除)。
@@ -191,10 +200,11 @@ cd <repo>/Servers && ./stop.sh
 1. **凭据与配置**：真实配置不入库——首次部署将各 `config.ini.example` / `config2.ini.example` / `config.json.example` 复制为去掉 `.example` 的文件并填入本机明文值；`Servers/.env`（`cp .env.example .env`）仅供脚本使用，缺失不影响服务启动。
 2. **启动顺序**：务必让 StatusServer 最后启动。
 3. **防火墙**：对外开放 **9090**、**50061**、**50062**；其余端口仅本机访问。
-4. **客户端连接**：需能访问服务器公网 IP，或在 StatusServer `config.ini` 的 `[ChatServers]` 配置可达 Host。
-5. **重启后检查**：确认 Redis 中无残留 `userver_{uid}` / `utoken_{uid}` 键影响再次登录。
-6. **凭据安全**：`.env`、真实 `config.ini`、`VerifyServer/config.json` 均已被 `.gitignore` 忽略；历史提交中的旧凭据视为已泄露，需轮换并用 `git filter-repo` 清理。
-7. **生产加固清单**（当前均未实现）：HTTPS/TLS 终止、GateServer 限流、gRPC 鉴权（mTLS 或服务间 token）、密码 bcrypt 哈希、日志脱敏。
+4. **客户端连接**：需能访问服务器公网 IP；在 ChatServer 的 `[SelfServer] PublicHost` 填写客户端可达地址。迁移期也可继续用 StatusServer `config.ini` 的 `[ChatServerN] Host` 覆盖。
+5. **重启后检查**：确认 Redis 中无残留 `userver_{uid}` / `utoken_{uid}` 键影响再次登录；`chat:nodes` 中不应残留已下线节点（异常退出最长 30 秒由 TTL 清理）。
+6. **Stream 运维**：跨服事件默认保留 1 天、每条流最多约 10 万条；节点停机超过 `StreamKeyTtlSeconds` 或事件超过 `StreamMaxEventAgeSeconds` 会被丢弃。普通运维只观察 `lag/pending`，不要随意删除 `chat:push:*`（会丢失未消费事件）。
+7. **凭据安全**：`.env`、真实 `config.ini`、`VerifyServer/config.json` 均已被 `.gitignore` 忽略；历史提交中的旧凭据视为已泄露，需轮换并用 `git filter-repo` 清理。
+8. **生产加固清单**（当前均未实现）：HTTPS/TLS 终止、GateServer 限流、gRPC 鉴权（mTLS 或服务间 token）、密码 bcrypt 哈希、日志脱敏。
 
 ## 八、使用 systemd 托管（可选）
 

@@ -43,10 +43,10 @@ private:
     void HandleTextChatMsg(std::shared_ptr<CSession>, const uint16_t msgId, const std::string& msg);
     bool GetBaseUserInfo(const std::string baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo);
     // 顶号：踢掉 uid 的旧会话。oldServer 为 Redis 中的旧路由节点名，
-    // 与本节点相同则直接发踢下线通知，否则走跨节点 gRPC
+    // 与本节点相同则直接发踢下线通知，否则投递到跨节点 RPC 派发线程
     void KickOldSession(int32_t uid, const std::string& oldServer,
         const std::shared_ptr<CSession>& oldLocalSession);
-    // 好友申请处理结果通知申请者：在线时按节点直发/跨节点 gRPC。
+    // 好友申请处理结果通知申请者：在线时按节点直发/跨节点异步 RPC。
     // notify 由 ProcessAuthFriend 组装（含同意时的处理者资料）
     void NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action,
         const Json::Value& notify);

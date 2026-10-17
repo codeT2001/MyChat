@@ -28,8 +28,8 @@
 | 邮箱验证码注册 / 登录 / 改密 | HTTP + gRPC 邮件验证码 | GateServer + VerifyServer |
 | 两段式登录 | HTTP 换取 token → TCP 长连接校验 token | GateServer + StatusServer + ChatServer |
 | 最小连接数负载均衡 | 依据 Redis `login_count` 哈希选节点 | StatusServer |
-| 聊天节点水平扩展 | 多 ChatServer 实例，节点间 gRPC 互推 | ChatServer |
-| 好友申请 / 认证 | 同服直推、跨服 gRPC 转发 | ChatServer |
+| 聊天节点水平扩展 | 多 ChatServer 实例，Redis 节点注册 + Stream 事件总线 | ChatServer + Redis |
+| 好友申请 / 认证 | 同服直推、跨服 Stream 异步投递（gRPC 可回滚） | ChatServer |
 | 实时文本消息 | 批量消息转发、已读状态 | ChatServer |
 | 在线会话管理 | 会话表 + Redis 路由/在线计数 | ChatServer + Redis |
 | 自动化回归测试 | 业务逻辑与 DB/Redis/gRPC 解耦，测试注入 fake；离线可跑 | `Servers/tests`、`Client/tests`（CTest）+ `Servers/VerifyServer/test`（Node） |
@@ -52,7 +52,7 @@ chat/
     │                           #     session_registry.h（uid→会话表模板，可单测）
     ├── GateServer/             #   HTTP 网关（Boost.Beast :9090）
     │                           #     src/http_params.*（URL/查询串解析）、src/gate_flow.*（纯业务函数）
-    ├── ChatServer/             #   TCP 聊天节点（可多实例，含节点间 gRPC）
+    ├── ChatServer/             #   TCP 聊天节点（可多实例，Stream 事件总线 + gRPC 回滚）
     │                           #     src/chat_flow.*（纯业务函数）、src/msg_codec.*（TCP 帧头）
     ├── StatusServer/           #   gRPC 协调服务（节点分配 / token 颁发与校验）
     │                           #     src/server_select.*、src/status_flow.*（纯函数）
@@ -93,7 +93,7 @@ graph TB
     end
 
     subgraph data["数据层"]
-        Redis[("Redis :6379<br/>token / 验证码 / 资料<br/>路由 / 在线计数")]
+        Redis[("Redis :6379<br/>token / 验证码 / 资料 / 路由<br/>在线计数 / 节点注册 / 事件流")]
         MySQL[("MySQL :3306<br/>user / user_id<br/>friend_apply / friend")]
         Mail["SMTP 邮件服务"]
     end
@@ -112,7 +112,11 @@ graph TB
 
     Status -- "Redis login_count / userver_" --> Redis
 
-    Chat1 <-- "节点间 gRPC 互推" --> Chat2
+    Chat1 -- "XADD chat:push:ChatServer2" --> Redis
+    Chat2 -- "XADD chat:push:ChatServer1" --> Redis
+    Redis -- "XGROUP 异步投递" --> Chat1
+    Redis -- "XGROUP 异步投递" --> Chat2
+    Chat1 -.->|"gRPC 回滚通道"| Chat2
     Chat1 -- "Redis 路由 / MySQL" --> Redis
     Chat1 --> MySQL
     Chat2 --> Redis
@@ -196,7 +200,7 @@ ChatServer 登录时直连 Redis 校验，**不删除**、靠 TTL 自然过期�
 | C++ 标准 | C++17 | 全项目 |
 | Qt | 6.2+（推荐 6.5+） | Widgets / Network / Gui |
 | Boost | 1.74+（含 Beast） | 服务端网络层 |
-| gRPC / Protobuf | 1.40+ / 3.12+ | 跨服通信 |
+| gRPC / Protobuf | 1.40+ / 3.12+ | 服务间 RPC / 跨服回滚通道 |
 | MySQL Connector/C++ | 8.0 | mysqlcppconn |
 | hiredis / redis++ | — | Redis 客户端 |
 
@@ -280,9 +284,10 @@ ctest --test-dir build --output-on-failure
 cd VerifyServer && npm install && npm test
 ```
 
-当前覆盖：**服务端 11 个 C++ 测试（103 个用例）+ 客户端 8 个测试（59 个用例）+ 3 个 Node 测试文件**。
+当前覆盖：**服务端 14 个 C++ 测试（114 个用例）+ 客户端 8 个测试（59 个用例）+ 3 个 Node 测试文件**。
 服务端覆盖注册/登录/改密/搜人/好友申请与认证/文本消息的判定分支、口令摘要与恒定时间比较、
-TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询串解析、顶号会话表语义；
+TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询串解析、顶号会话表语义、节点注册编解码、
+跨节点事件类型、RPC 派发；
 客户端覆盖「客户端常量 ↔ 服务端权威定义」的协议契约（消息号/错误码/action/HTTP 路径/头像数量）、
 帧编解码与帧长上限、JSON 请求序列化与回包解析、表单校验与服务器地址、`UserManager` 分页与备注、
 `rc.qrc` 资源登记，以及离屏点击级的界面交互（登录框校验/密码可见性/跳转信号、倒计时按钮、回车发送、
@@ -302,7 +307,8 @@ TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询�
 | [Servers/README.md](Servers/README.md) | 服务端总览、进程拓扑、构建与运维命令 |
 | [Servers/common/README.md](Servers/common/README.md) | 公共库：协议定义、常量、日志、配置、连接池、DAO |
 | [Servers/GateServer/README.md](Servers/GateServer/README.md) | HTTP 网关：路由表、请求/响应格式、错误码 |
-| [Servers/ChatServer/README.md](Servers/ChatServer/README.md) | 聊天节点：会话管理、消息分发、跨服 gRPC |
+| [Servers/ChatServer/README.md](Servers/ChatServer/README.md) | 聊天节点：会话管理、消息分发、跨服 Stream |
+| [Servers/CLUSTER_COMMUNICATION.md](Servers/CLUSTER_COMMUNICATION.md) | 多 ChatServer 通信改造前后对比、架构与运维 |
 | [Servers/StatusServer/README.md](Servers/StatusServer/README.md) | 节点分配与 token 颁发/校验 |
 | [Servers/VerifyServer/README.md](Servers/VerifyServer/README.md) | Node.js 验证码服务 |
 | [Servers/DEPLOY.md](Servers/DEPLOY.md) | 环境准备、数据库初始化、启动、排错 |

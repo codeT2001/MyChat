@@ -17,6 +17,7 @@ Port = 50052
 [Redis]
 Host = 127.0.0.1
 Port = 6379
+BlockingSocketTimeoutMs = 5000
 
 [MySQL]
 Host = 127.0.0.1
@@ -29,13 +30,26 @@ PoolMaxSize = 5
 [SelfServer]
 Name = ChatServer2
 Host = 127.0.0.1
+RpcHost = 127.0.0.1
+PublicHost = 127.0.0.1
 Port = 50062
 RPCPort = 50082
 
-[PeerServer]
-servers = ChatServer1
+[Cluster]
+NodeTTLSeconds = 30
+HeartbeatSeconds = 10
+NotifyTransport = stream
+StreamMaxLen = 100000
+StreamKeyTtlSeconds = 86400
+StreamBatchSize = 64
+StreamBlockMs = 1000
+StreamReclaimIntervalSeconds = 30
+StreamPendingMinIdleSeconds = 60
+StreamMaxDeliveryAttempts = 5
+StreamMaxEventAgeSeconds = 300
+DedupTtlSeconds = 600
 
-[ChatServer1]
-Name = ChatServer1
-Host = 127.0.0.1
-RPCPort = 50081
+[RPC]
+DeadlineMs = 500
+WorkerThreads = 2
+MaxPendingPerWorker = 4096

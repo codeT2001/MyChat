@@ -10,7 +10,7 @@
 
 - **用户认证**：注册、登录、密码重置（邮箱验证码）
 - **负载均衡接入**：StatusServer 按在线人数把新连接分配给最空闲的 ChatServer
-- **分布式聊天节点**：ChatServer 可水平扩展，节点间通过 gRPC 跨服推送
+- **分布式聊天节点**：ChatServer 可水平扩展，通过 Redis 节点注册表动态发现对端；跨节点通知默认写入目标的 `chat:push:{node}` Stream，由 consumer group 异步投递，gRPC 保留为灰度与回滚通道
 - **好友系统**：搜索用户、申请、同意/拒绝（`action=1/2`），拒绝后重新申请自动复位
 - **持久化与缓存**：MySQL 存用户与好友关系；Redis 存验证码 / token / 用户资料 / 路由 / 在线计数
 - **顶号**：重复登录不拒绝，自动踢掉旧会话
@@ -47,7 +47,7 @@ graph TB
     end
 
     subgraph dataLayer ["数据层"]
-        Redis[("Redis :6379<br/>token / 验证码 /<br/>用户路由 / 在线计数")]
+        Redis[("Redis :6379<br/>token / 验证码 / 用户路由<br/>在线计数 / 节点注册 / 事件流")]
         MySQL[("MySQL :3306<br/>user / user_id /<br/>friend_apply / friend")]
         Mail["SMTP 邮件服务"]
     end
@@ -66,11 +66,15 @@ graph TB
 
     Status -- token / 读在线计数 --> Redis
 
-    Chat1 -- 资料/token/路由/计数 --> Redis
-    Chat2 -- 资料/token/路由/计数 --> Redis
+    Chat1 -- 资料/token/路由/计数/节点注册 --> Redis
+    Chat2 -- 资料/token/路由/计数/节点注册 --> Redis
     Chat1 -- 申请/好友/用户 --> MySQL
     Chat2 -- 申请/好友/用户 --> MySQL
-    Chat1 <-->|"gRPC ChatService<br/>跨服好友通知/消息转发"| Chat2
+    Chat1 -- "XADD chat:push:ChatServer2" --> Redis
+    Chat2 -- "XADD chat:push:ChatServer1" --> Redis
+    Redis -- "XGROUP/XREADGROUP<br/>异步事件投递" --> Chat1
+    Redis -- "XGROUP/XREADGROUP<br/>异步事件投递" --> Chat2
+    Chat1 -.->|"gRPC ChatService（NotifyTransport=grpc 回滚）"| Chat2
 ```
 
 **三个 C++ server 都依赖 `libchat_common.a`**，公共代码通过 `target_link_libraries(... chat_common)` 传递。
@@ -123,8 +127,12 @@ chat/
 │       ├── user_manager.h/cpp     #   - uid → session 映射（用 SessionRegistry）
 │       ├── logic_system.h/cpp     #   - 登录/搜人/好友申请/认证
 │       ├── chat_flow.h/cpp        #   - 可单测的纯业务函数（搜人/登录/加好友/认证/文本消息）
-│       ├── chat_grpc_client.h/cpp #   - 向其他 ChatServer 发起 gRPC
-│       └── chat_service_impl.h/cpp#   - 处理其他 ChatServer 的 gRPC 通知
+│       ├── chat_message_router.h/cpp # - 跨节点通知统一出口（Stream / gRPC）
+│       ├── chat_event_bus.h/cpp      # - Redis Stream 发布端
+│       ├── chat_event_consumer.h/cpp # - consumer group、ACK、重试、死信
+│       ├── chat_notifier.h/cpp       # - 通知落地的共用逻辑
+│       ├── chat_grpc_client.h/cpp    # - gRPC 回滚通道与节点发现
+│       └── chat_service_impl.h/cpp   # - 处理其他 ChatServer 的 gRPC 通知
 │
 ├── GateServer/                    # HTTP 网关服务（业务层）
 │   ├── main.cpp / config.ini
@@ -200,11 +208,14 @@ cd VerifyServer && npm install && npm test   # Node.js 侧，用内置 test runn
 | `test_msg_codec` | `ChatServer/src/msg_codec.cpp` | 7 | TCP 帧头大端字节序（与客户端 QDataStream 对齐） |
 | `test_http_params` | `GateServer/src/http_params.cpp` | 8 | URL 解码（含畸形转义）、查询串解析 |
 | `test_session_registry` | `common/include/chat/session_registry.h` | 7 | uid→会话绑定、顶号语义（旧会话不得删新绑定） |
+| `test_node_info` | `common/src/node_info.cpp` | 6 | 节点注册信息编解码、旧字段兼容、endpoint 拼接 |
+| `test_rpc_dispatch` | `ChatServer/src/rpc_dispatcher` | 3 | 固定 key 落同一 worker、队列上限、停止语义 |
+| `test_chat_event` | `ChatServer/src/chat_event.cpp` | 2 | 跨节点事件类型名称与解析的往返/非法值 |
 | `VerifyServer/test` | `verify-code.js` / `constants.js` / 配置模板 | 8 | 验证码逻辑、**错误码与 C++ 逐项同值**、配置模板自检 |
 
-合计 **11 个 C++ 测试（103 用例）+ 3 个 Node 测试文件**。
+合计 **14 个 C++ 测试（114 用例）+ 3 个 Node 测试文件**。
 
-> 尚未覆盖的是纯 I/O 层：`mysql_dao` / `redis_manager` / `csession` 收发 / gRPC 客户端，
+> 尚未覆盖的是纯 I/O 层：`mysql_dao` / `redis_manager` / `chat_event_bus` / `chat_event_consumer` / `csession` 收发 / gRPC 客户端，
 > 需要真实依赖或容器化环境。新增用例的方式见 [AGENTS.md](AGENTS.md#测试)。
 
 ---
@@ -230,7 +241,7 @@ service StatusService {
   rpc Login(LoginReq) returns (LoginRsp);                          // 校验 token（TCP 登录时由 ChatServer 调用）
 }
 
-service ChatService {  // ChatServer 节点间
+service ChatService {  // ChatServer 节点间直连通道（NotifyTransport=grpc 灰度/回滚）
   rpc NotifyAddFriend(AddFriendReq) returns (AddFriendRsp);
   rpc ReplyFriend(ReplyFriendReq) returns (ReplyFriendRsp);         // 已定义，暂无调用
   rpc SendChatMsg(SendChatMsgReq) returns (SendChatMsgRsp);         // 已定义，暂无调用
@@ -282,6 +293,8 @@ service ChatService {  // ChatServer 节点间
 | 注册报错 / uid 异常 | 检查是否漏建 `user_id` 发号器表 |
 | Redis 连接失败 | `redis-cli ping`；核对 `config.ini` 的 `[Redis]` |
 | gRPC 连不上 | `pgrep -f "node.*server.js"`；看 `logs/` 下对应日志 |
+| 跨服通知延迟/丢失 | `redis-cli XLEN chat:push:{节点名}`、`XINFO GROUPS chat:push:{节点名}` 看 lag/pending；必要时把 `NotifyTransport` 临时切到 `grpc` |
+| 跨服事件反复重试 | `redis-cli XPENDING chat:push:{节点名}` 查看 pending；检查 `chat:dead:{节点名}` 与消费端日志 |
 | 登录成功但客户端连不上聊天节点 | `StatusServer/config.ini` 里的 ChatServer Host 不可达（本地部署需改成 `127.0.0.1`） |
 | 端口占用 | 9090 / 50051 / 50052 / 50061 / 50062 / 50081 / 50082 |
 | 配置加载失败 | 可执行文件与 `config.ini` 必须同目录（`build/<server>/`） |
@@ -311,6 +324,7 @@ service ChatService {  // ChatServer 节点间
 | [AGENTS.md](AGENTS.md) | 面向 AI Agent 的项目指引（构建/约定/约束） |
 | [DEPLOY.md](DEPLOY.md) | 部署与运维：依赖、数据库、构建、冒烟、systemd |
 | [REFACTORING.md](REFACTORING.md) | 三 Server 解耦的设计决策与权衡 |
+| [CLUSTER_COMMUNICATION.md](CLUSTER_COMMUNICATION.md) | 多 ChatServer 通信改造前后对比、架构、可靠性与运维 |
 | [common/README.md](common/README.md) | 公共静态库：组件、proto 契约、Redis 键约定、基础设施行为 |
 | [GateServer/README.md](GateServer/README.md) | HTTP 网关：流程图、注册/验证码/重置/登录时序 |
 | [ChatServer/README.md](ChatServer/README.md) | TCP 聊天节点：流程图、登录校验、好友/聊天时序与状态机、消息协议 |

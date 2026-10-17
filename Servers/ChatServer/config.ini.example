@@ -17,6 +17,8 @@ Port = 50052
 [Redis]
 Host = 127.0.0.1
 Port = 6379
+# XREADGROUP BLOCK 使用的独立阻塞连接 socket 超时（毫秒）
+BlockingSocketTimeoutMs = 5000
 
 [MySQL]
 Host = 127.0.0.1
@@ -28,14 +30,42 @@ PoolMaxSize = 5
 
 [SelfServer]
 Name = ChatServer1
+# gRPC 监听地址（本机有多个网卡时按需改）
 Host = 127.0.0.1
+# 对其他 ChatServer 通告的 gRPC 地址，缺省等于 Host
+RpcHost = 127.0.0.1
+# 下发给客户端的 TCP 地址，缺省等于 Host
+PublicHost = 127.0.0.1
+# 客户端 TCP 端口
 Port = 50061
+# 节点间 gRPC 端口
 RPCPort = 50081
 
-[PeerServer]
-servers = ChatServer2
+[Cluster]
+# 节点注册表：chat:node:{Name} 的 TTL / 心跳间隔（秒）
+NodeTTLSeconds = 30
+HeartbeatSeconds = 10
+# 跨节点通知传输方式：stream=Redis Stream（默认），grpc=直连 gRPC（灰度/回滚）
+NotifyTransport = stream
+# 每个节点事件流的最大长度（近似裁剪）与流 key TTL
+StreamMaxLen = 100000
+StreamKeyTtlSeconds = 86400
+# 消费批次、阻塞时间、pending 回收间隔与最小空闲时间
+StreamBatchSize = 64
+StreamBlockMs = 1000
+StreamReclaimIntervalSeconds = 30
+StreamPendingMinIdleSeconds = 60
+# 超过该投递次数写入 chat:dead:{node} 死信流
+StreamMaxDeliveryAttempts = 5
+# 事件最大存活时间（秒），避免节点长时间下线后重放过期消息；0 表示不限制
+StreamMaxEventAgeSeconds = 300
+# 消费端幂等去重键 TTL
+DedupTtlSeconds = 600
 
-[ChatServer2]
-Name = ChatServer2
-Host = 127.0.0.1
-RPCPort = 50082
+[RPC]
+# 跨节点同步 gRPC 的超时；超时后调用失败并刷新节点地址缓存
+DeadlineMs = 500
+# 跨节点 RPC 派发线程数（同一目标节点固定落到同一线程，保证顺序）
+WorkerThreads = 2
+# 每个派发线程的待处理队列上限，满队列丢弃并记录错误日志
+MaxPendingPerWorker = 4096

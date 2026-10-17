@@ -7,7 +7,7 @@
 - **GetChatServer**：按各 ChatServer 的在线连接数（Redis Hash `login_count`）选出负载最低的节点，返回其 host/port，并生成 UUID token 写入 Redis（`utoken_{uid}`）
 - **Login**：校验 uid + token 是否有效（由 ChatServer 的 TCP 登录流程调用）
 
-节点列表来自 `config.ini` 的 `[ChatServers]`；后台线程每 1 秒刷新一次最小负载节点缓存，RPC 请求只做短时间持锁的内存读取，不被 Redis IO 阻塞。
+节点列表优先来自 Redis 注册表（`chat:nodes` / `chat:node:{name}`，由 ChatServer 启动时写入并心跳续期），注册表为空时回落到 `config.ini` 的 `[ChatServers]`；后台线程每 1 秒刷新一次最小负载节点缓存，RPC 请求只做短时间持锁的内存读取，不被 Redis IO 阻塞。
 
 ## gRPC 接口
 
@@ -23,7 +23,7 @@ service StatusService {
 ```mermaid
 flowchart TD
     subgraph bg["后台刷新线程 · 每 1 秒"]
-        T1["读锁快照 servers_"] --> T2["HGETALL login_count"]
+        T1["SMEMBERS chat:nodes<br/>+ GET chat:node:{name}"] --> T2["HGETALL login_count"]
         T2 --> T3["计算 con_count 最小节点"]
         T3 --> T4["写锁替换 servers_ 与 minServer_"]
     end
@@ -82,11 +82,13 @@ Host = 127.0.0.1
 Port = 50052
 
 [ChatServers]
-Name = ChatServer1,ChatServer2      # 逗号分隔的节点名列表
+# 可选兜底：Redis 注册表不可用时才使用静态节点表；
+# ChatServer 配置好 PublicHost 后可以整段删除。
+Name = ChatServer1,ChatServer2
 
 [ChatServer1]
 Name = ChatServer1
-Host = 127.0.0.1                    # ⚠️ 默认配置里可能写成公网 IP
+Host = 127.0.0.1                    # 迁移期可覆盖注册表里的 PublicHost
 Port = 50061
 
 [ChatServer2]
@@ -99,7 +101,8 @@ Port = 50062
 
 ## 开发者注意
 
-- 新增 ChatServer 节点：在 `config.ini` 的 `[ChatServers] Name=...` 登记并添加对应 section；同时在各 ChatServer 的 `[PeerServer]` / `[ChatServerN]` 补齐对端信息
+- 新增 ChatServer 节点：启动时自动注册到 Redis，StatusServer 自动发现；无需修改其他 ChatServer 配置。若注册表不可用，再在 `[ChatServers]` 手工兜底。
+- 迁移期：注册表节点存在、且 `[ChatServerN] Host` 非空时，StatusServer 会优先使用旧配置的 Host 作为下发地址，避免 `SelfServer.Host` 只是监听地址时客户端连错。
 - 单线程编译验证：`cmake --build build --target statusServer -j1`
 
 ---

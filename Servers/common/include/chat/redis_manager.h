@@ -2,11 +2,39 @@
 #define _P1_REDIS_MANAGER_H_
 
 #include <memory>
+#include <optional>
 #include <sw/redis++/redis++.h>
+#include <utility>
+#include <vector>
 
 #include "chat/noncopyable.h"
 #include "chat/service_interfaces.h"
 namespace P1 {
+
+// Redis Stream 的一条消息。
+struct RedisStreamEntry {
+    std::string id;
+    std::vector<std::pair<std::string, std::string>> fields;
+
+    std::optional<std::string> Field(const std::string& name) const
+    {
+        for (const auto& [key, value] : fields) {
+            if (key == name) {
+                return value;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+// XPENDING 返回的待确认消息摘要。
+struct RedisPendingEntry {
+    std::string id;
+    std::string consumer;
+    int64_t idleMs = 0;
+    int64_t deliveryCount = 0;
+};
+
 class RedisManagerPool : public IKeyValueStore {
 public:
     static RedisManagerPool& GetInstance() { static RedisManagerPool instance; return instance; }
@@ -26,6 +54,35 @@ public:
     std::unordered_map<std::string, std::string> HGetAll(const std::string& key) override;
     // atomic increment by
     std::optional<std::string> HIncrBy(const std::string& key, const std::string& field, int64_t increment) override;
+
+    /* ---------- set（节点注册表用） ---------- */
+    int64_t SAdd(const std::string& key, const std::string& member);
+    int64_t SRem(const std::string& key, const std::string& member);
+    std::vector<std::string> SMembers(const std::string& key);
+
+    /* ---------- stream（跨节点事件总线用） ---------- */
+    // SET key val NX EX ttl：用于消费端幂等去重
+    bool SetNxEx(const std::string& key, const std::string& val, std::chrono::seconds ttl);
+    // XADD key [MAXLEN ~ maxLen] * field value ...；返回消息 ID，失败抛异常
+    std::string XAdd(const std::string& key,
+        const std::vector<std::pair<std::string, std::string>>& fields, int64_t maxLen = 0);
+    // XGROUP CREATE key group id [MKSTREAM]；BUSYGROUP 视为成功
+    bool XGroupCreate(const std::string& key, const std::string& group,
+        const std::string& id = "$", bool mkstream = true);
+    // XREADGROUP GROUP group consumer [COUNT n] [BLOCK ms] STREAMS key id
+    std::vector<RedisStreamEntry> XReadGroup(const std::string& key, const std::string& group,
+        const std::string& consumer, const std::string& id, int64_t count,
+        std::chrono::milliseconds block);
+    // XCLAIM key group consumer min-idle-time id ...
+    std::vector<RedisStreamEntry> XClaim(const std::string& key, const std::string& group,
+        const std::string& consumer, std::chrono::milliseconds minIdle,
+        const std::vector<std::string>& ids);
+    long long XAck(const std::string& key, const std::string& group, const std::string& id);
+    // XPENDING key group start end count（详情形式：id/consumer/idle/deliveryCount）
+    std::vector<RedisPendingEntry> XPending(const std::string& key, const std::string& group,
+        const std::string& start, const std::string& end, int64_t count);
+    long long XLen(const std::string& key);
+    bool Expire(const std::string& key, std::chrono::seconds ttl);
 
     /* ---------- list ---------- */
     void LPush(const std::string& key, const std::string& val);
@@ -47,7 +104,10 @@ private:
     RedisManagerPool();
     // 返回底层连接，未连接时返回 nullptr（避免空指针解引用崩溃）
     sw::redis::Redis* Client() const;
+    // 供 XREADGROUP BLOCK 等阻塞命令使用的独立连接，socket 超时更长。
+    sw::redis::Redis* BlockingClient() const;
     std::unique_ptr<sw::redis::Redis> redis_;
+    std::unique_ptr<sw::redis::Redis> blockingRedis_;
 };
 } // namespace P1
 

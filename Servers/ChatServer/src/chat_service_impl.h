@@ -4,6 +4,7 @@
 #include <grpcpp/grpcpp.h>
 
 #include "chat/service_interfaces.h"
+#include "chat_notifier.h"
 #include "chat_flow.h"
 #include "message.grpc.pb.h"
 namespace P1 {
@@ -41,6 +42,8 @@ public:
 private:
     // 资料读取（Redis 缓存 + MySQL 回填）走 chat_flow，与其他 handler 同一实现
     ChatDependencies deps_;
+    // gRPC 与 Redis Stream 两条链路共用的通知落地实现
+    ChatNotifier notifier_;
 
 };
 

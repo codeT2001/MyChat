@@ -1,10 +1,14 @@
 #ifndef _P1_CHAT_GRPC_CLIENT_H_
 #define _P1_CHAT_GRPC_CLIENT_H_
 
+#include <chrono>
 #include <grpcpp/grpcpp.h>
-#include <unordered_map>
 #include <memory>
-#include "jsoncpp/json/json.h"
+#include <mutex>
+#include <optional>
+#include <string>
+#include <unordered_map>
+
 #include "message.grpc.pb.h"
 #include "chat/noncopyable.h"
 #include "chat/rpc_stub_pool.h"
@@ -34,14 +38,31 @@ public:
     // ReplyFriendRsp ReplyFriend(const std::string& serverIp, const ReplyFriendReq& req);
     // SendChatMsgRsp SendChatMsg(const std::string& serverIp, const TextChatMsgReq& req);
     FriendAcceptedRsp NotifyFriendAccepted(const std::string& serverName, const FriendAcceptedReq& req);
-    TextChatMsgRsp NotifyTextChatMsg(const std::string& serverName, const TextChatMsgReq& req,
-        const Json::Value& rtvalue);
+    TextChatMsgRsp NotifyTextChatMsg(const std::string& serverName, const TextChatMsgReq& req);
     // 顶号：通知 oldServer 踢掉 uid 的旧会话
     KickUserRsp KickUser(const std::string& serverName, const KickUserReq& req);
     ~ChatGrpcClient();
 private:
+    struct PeerEndpoint {
+        std::string host;
+        std::string port;
+    };
+    struct PeerPool {
+        std::string endpoint;
+        std::chrono::steady_clock::time_point resolvedAt;
+        std::shared_ptr<RpcStubPool<ChatService>> pool;
+    };
+
     ChatGrpcClient();
-    std::unordered_map<std::string, std::unique_ptr<RpcStubPool<ChatService>>> pool_;
+    // 先查 Redis 节点注册表，找不到时回落到旧的 [ChatServerN] 配置，便于灰度迁移。
+    std::optional<PeerEndpoint> ResolveEndpoint(const std::string& serverName) const;
+    std::shared_ptr<RpcStubPool<ChatService>> GetPool(const std::string& serverName);
+    void Invalidate(const std::string& serverName);
+    void SetDeadline(grpc::ClientContext& context) const;
+
+    std::unordered_map<std::string, PeerPool> pools_;
+    mutable std::mutex poolMtx_;
+    int32_t deadlineMs_ = 500;
 };
 
 } // namespace P1

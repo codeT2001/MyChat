@@ -60,6 +60,8 @@ graph TB
 | `include/chat/mysql_manager.h` / `src/mysql_manager.cpp` | MySQL 管理器单例 `MysqlManager`（包装 `MysqlDao`） |
 | `include/chat/service_interfaces.h` | 基础设施接口层：`IUserStore` / `IKeyValueStore` / `IVerifyCodeService` / `IChatServerRouter`（业务与 DB/Redis/gRPC 解耦，单测注入 fake） |
 | `include/chat/session_registry.h` | `SessionRegistry<SessionPtr>`：uid → 会话指针的线程安全注册表模板（含顶号语义，有单测） |
+| `include/chat/node_info.h` / `src/node_info.cpp` | ChatServer 节点注册信息编解码（纯逻辑，有单测） |
+| `include/chat/node_registry.h` / `src/node_registry.cpp` | Redis 节点注册表读写、TTL 心跳与 RAII 注册器 |
 | `include/chat/password_crypto.h` / `src/password_crypto.cpp` | 口令摘要 `HashPassword`（固定盐 SHA-256）与恒定时间比较 `ConstantTimeEquals` |
 | `include/chat/rpc_stub_pool.h` | gRPC stub 连接池类模板（header-only） |
 | `include/chat/status_grpc_client.h` / `src/status_grpc_client.cpp` | StatusServer gRPC 客户端单例 |
@@ -83,6 +85,11 @@ graph TB
 | `uinfo_{uid}` | 用户资料 JSON 缓存 | ChatServer（miss 回源 MySQL 并回填），退出删除 |
 | `userver_{uid}` | 用户所在 ChatServer 节点名（跨服路由依据） | ChatServer 登录写入，退出时校验后删除 |
 | Hash `login_count` | 各节点在线连接计数 | ChatServer 登录 +1、退出 -1、进程退出 HDel 节点 |
+| Set `chat:nodes` | 当前存活 ChatServer 节点名集合 | ChatServer 启动 SADD、退出 SREM；StatusServer 读取并清理过期成员 |
+| String `chat:node:{name}` | 节点注册信息 JSON（rpc/public 地址与端口），TTL 30 秒 | ChatServer 启动写入、每 10 秒心跳续期 |
+| Stream `chat:push:{name}` | 目标 ChatServer 的跨节点事件流（`type/payload/source/event_id/created_ms`） | 任意 ChatServer 发布；目标节点 consumer group 消费 |
+| Stream `chat:dead:{name}` | 目标节点的死信流（超过最大投递次数或 payload 非法） | 目标节点消费端写入，保留最近 1 万条 |
+| String `chat:dedup:{name}:{streamId}` | Stream 消费幂等键，默认 TTL 600 秒 | 目标节点消费成功后 `SET NX EX` 写入 |
 
 > 验证码 key `code_{email}` 由 Node.js VerifyServer 写入（TTL 600 秒），仅 GateServer 读取，故前缀常量只定义在 GateServer 与 VerifyServer 中。
 >
@@ -136,9 +143,11 @@ C++ 服务间及服务端与客户端共享的整数契约，完整表见 [../RE
 
 ### Redis（redis_manager）
 
-- `RedisManagerPool` 单例，封装 sw::redis++；socket_timeout 200ms、connect_timeout 500ms、连接池 5、取连接 wait_timeout 100ms
+- `RedisManagerPool` 单例，封装 sw::redis++；默认 socket_timeout 200ms、connect_timeout 500ms、连接池 5、取连接 wait_timeout 100ms
 - 未连接或取连接超时时 `Client()` 返回 nullptr，调用方必须判空；故障期间降频告警避免日志风暴
-- 提供 string / hash / list / generic 命令的完整封装
+- 阻塞命令 `XREADGROUP BLOCK` 使用独立单连接（`[Redis] BlockingSocketTimeoutMs`，默认 5000ms）；普通连接保持 200ms socket 超时，避免阻塞读被 `EAGAIN` 打断
+- 提供 string / hash / set / list / generic 命令封装，以及 Stream API：`XAdd`、`XGroupCreate`、`XReadGroup`、`XClaim`、`XAck`、`XPending`、`XLen`、`Expire`
+- `XGroupCreate` 将 `BUSYGROUP` 视为成功，消费端可安全重试建组；`XAdd` 支持近似裁剪（`MAXLEN ~`）
 
 ### MySQL（mysql_dao + mysql_manager）
 

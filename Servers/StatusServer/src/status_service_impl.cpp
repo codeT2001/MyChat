@@ -6,6 +6,7 @@
 #include "chat/config_manager.h"
 #include "chat/constants.h"
 #include "chat/log.h"
+#include "chat/node_registry.h"
 #include "chat/redis_manager.h"
 #include "status_flow.h"
 namespace P1 {
@@ -47,8 +48,10 @@ StatusServiceImpl::StatusServiceImpl()
         server.name = cfg.GetValue<std::string>(secName, "Name");
         server.host = cfg.GetValue<std::string>(secName, "Host");
         server.port = cfg.GetValue<std::string>(secName, "Port");
-        servers_[server.name] = server;
+        configServers_[server.name] = server;
     }
+    // 启动初期先用配置兜底；后台刷新线程会优先用 Redis 注册表覆盖。
+    servers_ = configServers_;
     if (servers_.size()) {
         minServer_ = servers_.begin()->second;
     }
@@ -115,13 +118,32 @@ void StatusServiceImpl::StopCacheRefresher()
 
 void StatusServiceImpl::RefreshCache()
 {
-     // Step 1: 读取服务器列表快照
+    // Step 1: 优先从 Redis 节点注册表读取当前存活节点。
+    // 注册表为空（未升级/Redis 异常）时回落到 config.ini 的静态节点表。
     std::unordered_map<std::string, ChatServer> snapshot;
-    {
-        std::shared_lock<std::shared_mutex> lock(rwMtx_);
-        for (const auto& [name, server] : servers_) {
-            snapshot[name] = server;
+    try {
+        for (const auto& node : ListChatNodes()) {
+            ChatServer server;
+            server.name = node.name;
+            server.host = node.publicHost.empty() ? node.rpcHost : node.publicHost;
+            server.port = node.tcpPort;
+
+            // 迁移期兼容：StatusServer 旧配置里的 Host 是“下发到客户端的公网地址”，
+            // ChatServer 的 SelfServer.Host 可能只是监听地址。配置存在时优先保留旧地址。
+            auto cfgIter = configServers_.find(node.name);
+            if (cfgIter != configServers_.end() && !cfgIter->second.host.empty()) {
+                server.host = cfgIter->second.host;
+            }
+            if (server.host.empty() || server.port.empty()) {
+                continue;
+            }
+            snapshot[server.name] = server;
         }
+    } catch (const std::exception& e) {
+        LOG_ERROR("[StatusServer] read node registry failed:%s", e.what());
+    }
+    if (snapshot.empty()) {
+        snapshot = configServers_;
     }
     
     // Step 2: 一次性拉取所有计数（IO 在后台线程，不影响请求）
@@ -133,8 +155,8 @@ void StatusServiceImpl::RefreshCache()
         return;
     }
     if (snapshot.empty()) {
-        // 配置中没有任何 ChatServer，保留上一轮缓存，避免被空数据覆盖
-        LOG_WARN("[StatusServer] no chat server configured, keep previous cache");
+        // 注册表和配置都没有可用节点，保留上一轮缓存，避免被空数据覆盖
+        LOG_WARN("[StatusServer] no chat server available, keep previous cache");
         return;
     }
     const ChatServer minServer = PickMinServer(snapshot, count_map);

@@ -14,8 +14,12 @@
 #include "chat/verify_grpc_client.h"
 #include "user_manager.h"
 #include "chat/config_manager.h"
-#include "chat_grpc_client.h"
+#include "chat_message_router.h"
 namespace P1 {
+using message::AddFriendReq;
+using message::FriendAcceptedReq;
+using message::KickUserReq;
+using message::TextChatMsgReq;
 namespace {
 // 查目标用户所在节点；不在线返回空
 std::optional<std::string> GetPeerServer(int32_t uid)
@@ -175,18 +179,12 @@ void LogicSystem::KickOldSession(int32_t uid, const std::string& oldServer,
         oldLocalSession->SendMessage(kickMsg, static_cast<uint16_t>(MSG_IDS::NOTIFY_KICK));
         return;
     }
-    // 旧会话在其他节点：跨节点 gRPC 通知踢人。
+    // 旧会话在其他节点：走统一跨节点出口（Stream 或 gRPC），异步派发。
     // 旧节点已下线（残留路由键）时 RPC 会失败，忽略即可——
     // 路由键已被本次登录覆盖，残留状态就此自愈
     KickUserReq req;
     req.set_uid(uid);
-    auto rsp = ChatGrpcClient::GetInstance().KickUser(oldServer, req);
-    if (rsp.error() != static_cast<int32_t>(ErrorCodes::SUCCESS)) {
-        LOG_WARN("[LogicSystem] kick remote session failed (stale route?), uid:%d, old server:%s",
-            uid, oldServer.c_str());
-    } else {
-        LOG_WARN("[LogicSystem] kicked remote session, uid:%d, old server:%s", uid, oldServer.c_str());
-    }
+    ChatMessageRouter::GetInstance().KickUser(oldServer, req);
 }
 
 void LogicSystem::RegisterHandleCallback()
@@ -255,9 +253,10 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
         add_req.set_sex(apply_user_info->sex);
         add_req.set_nick(apply_user_info->nick);
     }
-    LOG_INFO("[LogicSystem] HandleAddFriend rpc to server:%s, from:%d, to:%d",
-        to_server.value().c_str(), plan.fromUid, plan.toUid);
-    ChatGrpcClient::GetInstance().NotifyAddFriend(to_server.value(), add_req);
+    const std::string peerServer = to_server.value();
+    LOG_INFO("[LogicSystem] HandleAddFriend queue rpc, server:%s, from:%d, to:%d",
+        peerServer.c_str(), plan.fromUid, plan.toUid);
+    ChatMessageRouter::GetInstance().NotifyAddFriend(peerServer, add_req);
 }
 
 // 服务器接受客户端发送过来的好友认证请求 self_uid = to_uid
@@ -302,9 +301,10 @@ void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t a
     accept_req.set_from_uid(peer_uid);
     accept_req.set_to_uid(self_uid);
     accept_req.set_action(action);
-    LOG_INFO("[LogicSystem] NotifyAuthResult rpc to server:%s, from:%d, to:%d, action:%d",
-        peer_server.value().c_str(), peer_uid, self_uid, action);
-    ChatGrpcClient::GetInstance().NotifyFriendAccepted(peer_server.value(), accept_req);
+    const std::string peerServer = peer_server.value();
+    LOG_INFO("[LogicSystem] NotifyAuthResult queue rpc, server:%s, from:%d, to:%d, action:%d",
+        peerServer.c_str(), peer_uid, self_uid, action);
+    ChatMessageRouter::GetInstance().NotifyFriendAccepted(peerServer, accept_req);
 }
 
 // 处理文本聊天消息 self_uid ---> peer_uid
@@ -340,6 +340,7 @@ void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uin
         text_msg->set_msg_id(msg_id);
         text_msg->set_msg_content(content);
     }
-    ChatGrpcClient::GetInstance().NotifyTextChatMsg(peer_server.value(), text_msg_req, ctx.Response());
+    const std::string peerServer = peer_server.value();
+    ChatMessageRouter::GetInstance().NotifyTextChatMsg(peerServer, text_msg_req);
 }
 } // namespace P1

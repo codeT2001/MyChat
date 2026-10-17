@@ -2,7 +2,9 @@
 
 ## 简介
 
-分布式聊天系统的核心聊天节点：负责客户端 TCP 长连接、登录校验、好友关系维护，以及节点间通过 gRPC 互相推送好友通知与消息。可部署多实例（`config.ini` / `config2.ini`），由 StatusServer 按 Redis 中的 `login_count` 做最小连接数分配。
+分布式聊天系统的核心聊天节点：负责客户端 TCP 长连接、登录校验、好友关系维护，以及节点间的好友通知与消息转发。跨节点通知默认投递到 Redis Stream（每个节点一条事件流），由消费组异步落地；`ChatService` gRPC 保留为灰度与回滚通道。可部署多实例（`config.ini` / `config2.ini`），由 StatusServer 按 Redis 中的 `login_count` 做最小连接数分配。
+
+> 多节点通信的改造前后对比、完整架构与运维命令见 [../CLUSTER_COMMUNICATION.md](../CLUSTER_COMMUNICATION.md)。
 
 ## 核心功能
 
@@ -10,7 +12,8 @@
 - **单线程业务队列**：收包反序列化成 `MsgNode` 投递到 `LogicSystem` 队列，由独立逻辑线程串行处理（业务无锁）
 - **登录二次校验**：GateServer 颁发的 token 在 TCP 建连后仍需经 StatusServer gRPC 校验
 - **好友系统**：搜索用户、申请、同意（action=1）/拒绝（action=2）；拒绝后对方重新申请自动复位为待处理
-- **文本聊天**：`text_array` 批量承载多条文本（每条带客户端生成的 msg_id），同服直接推 session，跨服走 `ChatService` gRPC
+- **文本聊天**：`text_array` 批量承载多条文本（每条带客户端生成的 msg_id），同服直接推 session，跨服写入目标节点的 `chat:push:{node}` Stream
+- **可靠的跨节点事件投递**：Redis Stream consumer group + `XACK` + `XPENDING/XCLAIM` 重试 + 去重键 + 死信流，至少一次投递
 - **统一回包与异常兜底**：各 Handler 用 `HandlerContext`（RAII 骨架）保证任何分支都回包，单条消息异常不会杀死逻辑线程
 
 ## 架构组成
@@ -24,9 +27,13 @@
 | LogicSystem | 消息分发骨架：注册 `handleFuncs_`（msgId → Handler），单线程消费队列；Handler 只做解析与回包 |
 | ChatFlow | `chat_flow.*`：可单测的纯业务函数（搜人 / 资料加载 / 登录 / 加好友 / 认证 / 文本消息 / 跨节点通知 JSON） |
 | UserManager | 内存中 uid → shared_ptr\<CSession\> 映射，用 `common` 的 `SessionRegistry` 模板（互斥保护） |
-| ChatServiceImpl | gRPC 服务端：接收其他节点的通知，组装 JSON 的纯逻辑同样复用 `chat_flow` |
-| ChatGrpcClient | 按 `[PeerServer]` 配置为每个对端节点维护一个 gRPC stub 池（每池 5 条） |
-| ChatServiceImpl | gRPC 服务端：接收其他节点的 `NotifyAddFriend / NotifyFriendAccepted / NotifyTextChatMsg` |
+| ChatNotifier | 跨节点通知的统一落地逻辑：查本机会话并组装 JSON 推给客户端；gRPC 服务端与 Stream 消费者共用 |
+| ChatServiceImpl | gRPC 服务端（灰度/回滚通道）：接收其他节点直连通知，落地逻辑复用 `ChatNotifier` |
+| ChatGrpcClient | 按需动态发现对端：优先读 Redis 节点注册表，找不到时回落到旧 `[ChatServerN]` 配置；每个对端一个 stub 池（每池 5 条），带 deadline |
+| ChatEventBus | Stream 发布端：`XADD chat:push:{target}`，payload 为 protobuf 二进制，并维护流长度与 TTL |
+| ChatEventConsumer | Stream 消费端：consumer group 消费、ACK、pending 回收、幂等去重、过期丢弃与死信写入 |
+| ChatMessageRouter | 跨节点通知统一出口：按 `[Cluster] NotifyTransport` 选择 Stream 或 gRPC，两种方式都经 `RpcDispatcher` 异步执行 |
+| RpcDispatcher | 把跨节点通知从 LogicSystem 单业务线程移到固定 worker；同一目标节点固定同一 worker，保证本节点到该对端的投递顺序 |
 
 ## 内部处理流程
 
@@ -46,7 +53,8 @@ flowchart TD
     EX --> RT{"目标用户在哪?"}
     RT -- 离线 --> OFF[不推送，靠登录拉列表兜底]
     RT -- 同服在线 --> LOC[UserManager 取 session 直接推送]
-    RT -- 跨服 --> GRPC[ChatGrpcClient 调对端 ChatService]
+    RT -- 跨服 --> EVT[ChatMessageRouter 写入 chat:push:目标节点]
+    EVT --> CON[目标节点 ChatEventConsumer 消费并推送]
     EX --> R[HandlerContext 统一 SendMessage 回请求方]
 ```
 
@@ -71,7 +79,7 @@ flowchart TD
 | 10017 | NOTIFY_KICK | S→C | error, reason（顶号踢下线通知，客户端收到后断开并退回登录页） |
 | 99999 | CHAT_HEARTBEAT | C→S | 空 body（客户端 30s 一次；服务端收到即连接存活） |
 
-> `NotifyKickUser` 已实现（顶号踢下线）：新登录绑定会话后，同节点旧会话直发 `NOTIFY_KICK`，跨节点走 `ChatService.NotifyKickUser`。
+> 顶号踢下线已实现：新登录绑定会话后，同节点旧会话直发 `NOTIFY_KICK`；跨节点由 `ChatMessageRouter` 默认投递 `KickUser` 事件到 `chat:push:{oldNode}`，`NotifyTransport=grpc` 时回退为 `ChatService.NotifyKickUser`。
 
 ## 业务时序
 
@@ -123,7 +131,8 @@ sequenceDiagram
     else B 与 A 同服
         CSA->>B: NOTIFY_ADD_FRIEND_REQ（申请人资料）
     else B 在其他节点
-        CSA->>CSB: gRPC NotifyAddFriend
+        CSA->>R: XADD chat:push:CSB（AddFriend 事件）
+        R-->>CSB: XREADGROUP 消费事件
         CSB->>B: NOTIFY_ADD_FRIEND_REQ（申请人资料）
     end
     CSA-->>A: ADD_FRIEND_RSP {error:0}
@@ -156,7 +165,8 @@ sequenceDiagram
     alt A 同服在线
         SB->>A: NOTIFY_AUTH_FRIEND_REQ（from=A,to=B,action,同意附 B 资料）
     else A 在其他节点
-        SB->>SA: gRPC NotifyFriendAccepted {from:A,to:B,action}
+        SB->>RD: XADD chat:push:SA（FriendAccepted 事件）
+        RD-->>SA: XREADGROUP 消费事件
         SA->>A: NOTIFY_AUTH_FRIEND_REQ（同上）
     else A 离线
         Note over SB: 不推送；A 登录时 GetApplyList 得到最新 status
@@ -195,7 +205,8 @@ sequenceDiagram
     else B 与 A 同服
         SA->>B: NOTIFY_TEXT_CHAT_MSG_REQ（from/to/text_array）
     else B 在其他节点
-        SA->>SB: gRPC NotifyTextChatMsg {from,to,msgs}
+        SA->>R: XADD chat:push:SB（TextChatMsg 事件）
+        R-->>SB: XREADGROUP 消费事件
         SB->>B: NOTIFY_TEXT_CHAT_MSG_REQ（重新组装 text_array）
     end
     SA-->>A: TEXT_CHAT_MSG_RSP {error:0, text_array}
@@ -212,6 +223,11 @@ sequenceDiagram
 | Redis `uinfo_{uid}` | 用户资料缓存（未命中回源 MySQL 并回写），会话断开时删除 |
 | Redis `userver_{uid}` | 用户所在节点名，跨服路由依据；登录时写入 |
 | Redis Hash `login_count` | 各节点在线计数，登录 `HINCRBY +1`，断开 `HINCRBY -1`，进程退出 `HDel` 节点 |
+| Redis Set `chat:nodes` | 当前 ChatServer 节点名集合，节点启动 `SADD`、退出 `SREM` |
+| Redis String `chat:node:{name}` | 节点注册信息 JSON（rpc/public 地址 + 端口），带 TTL，每 10 秒心跳续期 |
+| Redis Stream `chat:push:{name}` | 目标节点的事件流；事件字段 `type/payload/source/event_id/created_ms`，默认裁剪到 10 万条、TTL 1 天 |
+| Redis Stream `chat:dead:{name}` | 处理失败或超过最大投递次数的死信，保留最近 1 万条、TTL 1 天 |
+| Redis String `chat:dedup:{name}:{streamId}` | Stream 幂等去重键，默认 TTL 600 秒 |
 | MySQL `friend_apply` | 申请记录，唯一键 (from_uid,to_uid)，`status` 0待处理/1同意/2拒绝 |
 | MySQL `friend` | 同意后写入的双向好友关系 |
 
@@ -226,25 +242,47 @@ sequenceDiagram
 ```ini
 [SelfServer]
 Name = ChatServer1
-Host = 127.0.0.1
-Port = 50061          # 客户端 TCP
-RPCPort = 50081       # 节点间 gRPC
+Host = 127.0.0.1        # gRPC 监听地址
+RpcHost = 127.0.0.1     # 对其他 ChatServer 通告的地址（缺省 = Host）
+PublicHost = 127.0.0.1  # 下发给客户端的 TCP 地址（缺省 = Host）
+Port = 50061
+RPCPort = 50081
 
-[PeerServer]
-servers = ChatServer2 # 逗号分隔，启动时为每个节点建立 stub 池
+[Cluster]
+NodeTTLSeconds = 30
+HeartbeatSeconds = 10
+NotifyTransport = stream       # stream（默认）/ grpc（灰度或回滚）
+StreamMaxLen = 100000          # 每条节点事件流的近似最大长度
+StreamKeyTtlSeconds = 86400    # 事件流与死信流的 TTL
+StreamBatchSize = 64
+StreamBlockMs = 1000
+StreamReclaimIntervalSeconds = 30
+StreamPendingMinIdleSeconds = 60
+StreamMaxDeliveryAttempts = 5
+StreamMaxEventAgeSeconds = 300 # 节点长时间离线后丢弃过旧事件；0 表示不限制
+DedupTtlSeconds = 600
 
-[ChatServer2]
-Host = 127.0.0.1
-RPCPort = 50082
+[RPC]
+DeadlineMs = 500
+WorkerThreads = 2
+MaxPendingPerWorker = 4096
 ```
 
-启动时同时监听 TCP 与 gRPC；`start.sh` 分别以 `config.ini`、`config2.ini` 拉起两个实例。
+启动时同时监听 TCP 与 gRPC；`start.sh` 分别以 `config.ini`、`config2.ini` 拉起两个实例。`NotifyTransport=stream` 时先建立本节点的 consumer group，再向 Redis 注册节点，避免其他节点开始投递时本节点还没准备好消费。
 
-> 💡 **新增节点**：在 `config*.ini` 加 `[SelfServer]`，并在所有其他节点的 `[PeerServer]` / `[ChatServerN]` 补齐对端信息，同时更新 `StatusServer/config.ini` 的 `[ChatServers]`。三处必须一致，否则跨服路由失败。
+启动后节点会把自身注册到 Redis：`SADD chat:nodes {Name}` + `SETEX chat:node:{Name} {json} 30`。其他节点不需要预配置对端：Stream 模式只依赖目标节点名（来自 `userver_{uid}`）写入对应的 `chat:push:{name}`；gRPC 回滚模式首次调用时按节点名查注册表并建立连接。节点异常退出后注册键 30 秒内自然过期。
+
+> 💡 **新增节点**：只需给新节点一份 `[SelfServer]` 配置并启动。旧节点无需改配置；StatusServer 会自动从 `chat:nodes` 发现它。`StatusServer/config.ini` 的 `[ChatServers]` 仅作为 Redis 不可用时的兜底。
+>
+> 多机部署时：`Host` 填 gRPC 监听地址（如 `0.0.0.0`），`RpcHost` 填其他节点可达的内网 IP，`PublicHost` 填客户端可达的公网 IP/域名。
 
 ## 开发者注意
 
-- Handler 全跑在**同一逻辑线程**，禁止长时间阻塞；跨服 gRPC 为同步调用且**未设 deadline**（连接挂起会拖住整条业务队列）
+- Handler 全跑在**同一逻辑线程**，禁止长时间阻塞；跨节点通知通过 `ChatMessageRouter` 投递到 `RpcDispatcher`，Stream 的 `XADD` 与 gRPC 调用都不在业务线程执行
+- gRPC 回滚模式设置 `[RPC] DeadlineMs`，单个对端卡住不会拖住业务队列；派发队列满时会丢弃通知并记录错误日志
+- Stream 模式是**至少一次投递**：消费成功才 `XACK`，失败保留 pending 并由 `XCLAIM` 重试；超过 `StreamMaxDeliveryAttempts` 或 payload 非法时进入 `chat:dead:{node}`
+- 客户端回包仍是**本节点即时返回**：Stream 只保证事件异步送达目标节点，不代表目标客户端已收到；需要强同步结果的控制面请求继续走 gRPC
+- 同一发布节点到同一目标节点的顺序由固定 `RpcDispatcher` worker 保证；不同发布节点之间没有全局顺序，业务侧应按 `msg_id` 幂等
 - 回包统一用 `HandlerContext`（构造解析请求、析构发送响应），新增错误分支直接 `return`，不要漏发响应
 - 新增业务判定先写进 `chat_flow.*` 的纯函数并补单测（见 `tests/test_chat_flow.cpp`），Handler 只保留路由与发送
 - 日志用 `LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR`，**禁止 `std::cout`**；含 token/密码的请求禁止打印整个 body
@@ -256,7 +294,7 @@ RPCPort = 50082
 ## 单元测试
 
 ```bash
-cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(chat_flow|msg_codec|session_registry|msg_node)' --output-on-failure
+cd Servers && cmake --build build -j1 && ctest --test-dir build -R 'test_(chat_flow|msg_codec|session_registry|msg_node|node_info|rpc_dispatch|chat_event)' --output-on-failure
 ```
 
 无关 MySQL / Redis / 网络：业务判定在 `chat_flow.*` 里以纯函数实现，依赖经 `ChatDependencies`

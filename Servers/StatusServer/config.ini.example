@@ -19,6 +19,9 @@ Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
 
+# 节点列表默认从 Redis 注册表（chat:nodes / chat:node:{name}）自动发现。
+# 下面的静态表仅作为 Redis 不可用或灰度迁移期间的兜底。
+# 若 ChatServer 配置了 PublicHost，可以删除整个 [ChatServers] 及 [ChatServerN] 段。
 [ChatServers]
 Name = ChatServer1,ChatServer2
 
