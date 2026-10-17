@@ -19,9 +19,9 @@ public:
     bool CheckPassword(const std::string& name, const std::string& pwd, UserInfo& userInfo) override;
     std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) override;
     std::shared_ptr<UserInfo> GetUserByName(const std::string& name);
-    bool AddFriendApply(const int from, const int to);
-	bool AuthFriendApply(const int from, const int to, const int status);
-	bool AddFriend(const int from, const int to, const std::string& back_name);
+    bool AddFriendApply(const int from, const int to) override;
+	bool AuthFriendApply(const int from, const int to, const int status) override;
+	bool AddFriend(const int from, const int to, const std::string& back_name) override;
     bool GetApplyList(int touid, std::vector<std::shared_ptr<ApplyInfo>>& list, int begin, int limit = 10) override;
 	bool GetFriendList(int self_id, std::vector<std::shared_ptr<UserInfo> >& list) override;
     // bool TestProcedure(const std::string &email, int& uid, const std::string & name);

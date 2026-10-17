@@ -121,7 +121,7 @@ chat/
 │       ├── msg_node.h/cpp         #   - 消息节点
 │       ├── user_manager.h/cpp     #   - uid → session 映射
 │       ├── logic_system.h/cpp     #   - 登录/搜人/好友申请/认证
-│       ├── chat_flow.h/cpp        #   - 可单测的纯业务函数（搜人、申请/好友列表序列化）
+│       ├── chat_flow.h/cpp        #   - 可单测的纯业务函数（搜人/登录/加好友/认证/文本消息）
 │       ├── chat_grpc_client.h/cpp #   - 向其他 ChatServer 发起 gRPC
 │       └── chat_service_impl.h/cpp#   - 处理其他 ChatServer 的 gRPC 通知
 │
@@ -137,7 +137,8 @@ chat/
 │   ├── main.cpp / config.ini
 │   └── src/
 │       ├── status_service_impl.h/cpp  # 节点分配、token 颁发、负载刷新
-│       └── server_select.h/cpp        # 选点纯函数 PickMinServer（最小在线数）
+│       ├── server_select.h/cpp        # 选点纯函数 PickMinServer（最小在线数）
+│       └── status_flow.h/cpp          # token 生成 / 写入 / 校验纯函数
 │
 ├── VerifyServer/                  # Node.js 邮件验证服务（gRPC :50051）
 │

@@ -223,52 +223,40 @@ void LogicSystem::HandleAddFriend(std::shared_ptr<CSession> session, const uint1
 {
     LOG_DEBUG("[LogicSystem] HandleAddFriend, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::ADD_FRIEND_RSP, msg);
-    const Json::Value& src = ctx.Request();
-    Json::Value& rtValue = ctx.Response();
-    auto from_uid = src["from_uid"].asInt();
-    auto to_uid = src["to_uid"].asInt();
-    auto name = src["name"].asString();
-    auto desc = src["desc"].asString();
-    auto remark_name = src["remark_name"].asString();
-    (void)remark_name;
+    // 落库 + 回包 + 本地通知内容（纯逻辑，见 chat_flow.cpp）
+    const AddFriendPlan plan = ProcessAddFriend(ctx.Request(), deps_);
+    ctx.Response() = plan.response;
 
-    // 通知逻辑结束后统一给申请者回包
-    rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-
-    MysqlManager::GetInstance().AddFriendApply(from_uid, to_uid);
-    auto to_server = GetPeerServer(to_uid);
+    auto to_server = GetPeerServer(plan.toUid);
     if (!to_server.has_value()) {
-        LOG_INFO("[LogicSystem] HandleAddFriend, to_uid:%d offline", to_uid);
+        LOG_INFO("[LogicSystem] HandleAddFriend, to_uid:%d offline", plan.toUid);
         return;
     }
     if (IsPeerLocal(to_server)) {
-        auto psession = UserManager::GetInstance().GetSession(to_uid);
+        auto psession = UserManager::GetInstance().GetSession(plan.toUid);
         if (!psession) {
-            LOG_WARN("[LogicSystem] HandleAddFriend, to_uid:%d session not found", to_uid);
+            LOG_WARN("[LogicSystem] HandleAddFriend, to_uid:%d session not found", plan.toUid);
             return;
         }
-        Json::Value val;
-        val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-        val["desc"] = desc;
-        val["name"] = name;
-        val["apply_uid"] = from_uid;
-        psession->SendMessage(val.toStyledString(), static_cast<uint16_t>(MSG_IDS::NOTIFY_ADD_FRIEND_REQ));
+        psession->SendMessage(plan.notify.toStyledString(),
+            static_cast<uint16_t>(MSG_IDS::NOTIFY_ADD_FRIEND_REQ));
         return;
     }
     // 通过rpc通知
-    std::string info_key = USER_INFO_PREFIX + std::to_string(from_uid);
+    const std::string info_key = std::string(USER_INFO_PREFIX) + std::to_string(plan.fromUid);
     auto apply_user_info = std::make_shared<UserInfo>();
     AddFriendReq add_req;
-    add_req.set_apply_uid(from_uid);
-    add_req.set_to_uid(to_uid);
-    add_req.set_name(name);
-    add_req.set_desc(desc);
-    if (GetBaseUserInfo(info_key, from_uid, apply_user_info)) {
+    add_req.set_apply_uid(plan.fromUid);
+    add_req.set_to_uid(plan.toUid);
+    add_req.set_name(plan.notify["name"].asString());
+    add_req.set_desc(plan.notify["desc"].asString());
+    if (GetBaseUserInfo(info_key, plan.fromUid, apply_user_info)) {
         add_req.set_icon(apply_user_info->icon);
         add_req.set_sex(apply_user_info->sex);
         add_req.set_nick(apply_user_info->nick);
     }
-    LOG_INFO("[LogicSystem] HandleAddFriend rpc to server:%s, from:%d, to:%d", to_server.value().c_str(), from_uid, to_uid);
+    LOG_INFO("[LogicSystem] HandleAddFriend rpc to server:%s, from:%d, to:%d",
+        to_server.value().c_str(), plan.fromUid, plan.toUid);
     ChatGrpcClient::GetInstance().NotifyAddFriend(to_server.value(), add_req);
 }
 
@@ -278,66 +266,20 @@ void LogicSystem::HandleAuthFriend(std::shared_ptr<CSession> session, const uint
 {
     LOG_DEBUG("[LogicSystem] HandleAuthFriend, msgId:%u", msgId);
     HandlerContext ctx(session, MSG_IDS::AUTH_FRIEND_RSP, msg);
-    const Json::Value& src = ctx.Request();
-    Json::Value& rtValue = ctx.Response();
-    auto peer_uid = src["from_uid"].asInt();   // 申请者
-    auto self_uid = src["to_uid"].asInt();     // 处理者（本人）
-    auto remark_name = src["remark_name"].asString();
-    // 旧客户端不带 action，默认同意
-    auto action = src.isMember("action") ? src["action"].asInt() : FRIEND_ACTION_ACCEPT;
-
-    rtValue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-
-    if (action != FRIEND_ACTION_ACCEPT && action != FRIEND_ACTION_REJECT) {
-        LOG_WARN("[LogicSystem] HandleAuthFriend invalid action:%d, from:%d, to:%d", action, peer_uid, self_uid);
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+    // 校验 action → 更新申请状态 →（同意时）建立好友关系（纯逻辑，见 chat_flow.cpp）
+    const AuthFriendPlan plan = ProcessAuthFriend(ctx.Request(), deps_);
+    ctx.Response() = plan.response;
+    if (!plan.ok) {
         return;
     }
-
-    // 响应里需要带【申请人】的 id/资料，客户端据此在申请列表中定位并更新该条申请
-    std::string peer_key = USER_INFO_PREFIX + std::to_string(peer_uid);
-    auto userInfo = std::make_shared<UserInfo>();
-    if (GetBaseUserInfo(peer_key, peer_uid, userInfo)) {
-        rtValue["uid"] = peer_uid;
-        rtValue["from_uid"] = peer_uid;   // 申请人
-        rtValue["to_uid"] = self_uid;     // 处理者（本人）
-        rtValue["name"] = userInfo->name;
-        rtValue["nick"] = userInfo->nick;
-        rtValue["icon"] = userInfo->icon;
-        rtValue["sex"] = userInfo->sex;
-    }
-    else {
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-        return;
-    }
-    rtValue["action"] = action;
-
-    // 1) 同步申请状态：同意置 1，拒绝置 2
-    const int32_t applyStatus =
-        (action == FRIEND_ACTION_ACCEPT) ? APPLY_STATUS_ACCEPTED : APPLY_STATUS_REJECTED;
-    if (!MysqlManager::GetInstance().AuthFriendApply(peer_uid, self_uid, applyStatus)) {
-        LOG_WARN("[LogicSystem] HandleAuthFriend update apply status failed, from:%d, to:%d, action:%d",
-            peer_uid, self_uid, action);
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-        return;
-    }
-
-    // 2) 同意才建立好友关系；拒绝不建立
-    if (action == FRIEND_ACTION_ACCEPT &&
-        !MysqlManager::GetInstance().AddFriend(peer_uid, self_uid, remark_name)) {
-        LOG_WARN("[LogicSystem] HandleAuthFriend AddFriend failed, from:%d, to:%d", peer_uid, self_uid);
-        rtValue["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-        return;
-    }
-    LOG_INFO("[LogicSystem] HandleAuthFriend %s, from:%d, to:%d",
-        action == FRIEND_ACTION_ACCEPT ? "accepted" : "rejected", peer_uid, self_uid);
-
-    // 3) 通知申请者处理结果（在线才通知，离线时其重新登录会拉取最新申请状态）
-    NotifyAuthResult(peer_uid, self_uid, action);
+    // 通知申请者处理结果（在线才通知，离线时其重新登录会拉取最新申请状态）
+    NotifyAuthResult(plan.peerUid, plan.selfUid, plan.action, plan.notify);
 }
 
 // 通知申请者好友申请处理结果：在线才通知，离线时其重新登录会拉取最新申请状态
-void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action)
+// notify 由 ProcessAuthFriend 组装好（含同意时的处理者资料）
+void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t action,
+    const Json::Value& notify)
 {
     auto peer_server = GetPeerServer(peer_uid);
     if (!peer_server.has_value()) {
@@ -351,28 +293,8 @@ void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t a
             LOG_WARN("[LogicSystem] NotifyAuthResult, peer_uid:%d session not found", peer_uid);
             return;
         }
-        Json::Value val;
-        val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-        val["action"] = action;
-        // 统一语义：from_uid=申请人（即接收通知者自己），to_uid=处理者
-        val["from_uid"] = peer_uid;
-        val["to_uid"] = self_uid;
-        // 同意才携带处理者资料（客户端据此建好友会话）；拒绝只需 id + action
-        if (action == FRIEND_ACTION_ACCEPT) {
-            std::string self_key = USER_INFO_PREFIX + std::to_string(self_uid);
-            auto uInfo = std::make_shared<UserInfo>();
-            if (GetBaseUserInfo(self_key, self_uid, uInfo)) {
-                val["name"] = uInfo->name;
-                val["desc"] = uInfo->desc;
-                val["nick"] = uInfo->nick;
-                val["icon"] = uInfo->icon;
-                val["sex"] = uInfo->sex;
-            }
-            else {
-                val["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
-            }
-        }
-        psession->SendMessage(val.toStyledString(), static_cast<uint16_t>(MSG_IDS::NOTIFY_AUTH_FRIEND_REQ));
+        psession->SendMessage(notify.toStyledString(),
+            static_cast<uint16_t>(MSG_IDS::NOTIFY_AUTH_FRIEND_REQ));
         return;
     }
     // 通过rpc通知对端服务器
@@ -386,49 +308,38 @@ void LogicSystem::NotifyAuthResult(int32_t peer_uid, int32_t self_uid, int32_t a
 }
 
 // 处理文本聊天消息 self_uid ---> peer_uid
-void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg) {
-    LOG_INFO("[LogicSystem] HandleTextChatMsg, msgId:%d, msg:%s", msgId, msg.c_str());
+void LogicSystem::HandleTextChatMsg(std::shared_ptr<CSession> session, const uint16_t msgId, const std::string& msg)
+{
+    LOG_INFO("[LogicSystem] HandleTextChatMsg, msgId:%d", msgId);
     HandlerContext ctx(session, MSG_IDS::TEXT_CHAT_MSG_RSP, msg);
-    const Json::Value& src = ctx.Request();
-    Json::Value& rtvalue = ctx.Response();
-    auto self_uid = src["from_uid"].asInt();   // 发送者
-    auto peer_uid = src["to_uid"].asInt();     // 接收者
-    const Json::Value array = src["text_array"];
-    rtvalue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
-    rtvalue["text_array"] = array;
-    rtvalue["from_uid"] = self_uid;
-    rtvalue["to_uid"] = peer_uid;
+    // 回包 + 跨节点需要的消息列表（纯逻辑，见 chat_flow.cpp）
+    const TextChatPlan plan = ProcessTextChatMsg(ctx.Request());
+    ctx.Response() = plan.response;
 
-    //查询redis 查找peer_uid对应的server ip
-    auto peer_server = GetPeerServer(peer_uid);
+    // 查询redis 查找 peer_uid 对应的 server
+    auto peer_server = GetPeerServer(plan.toUid);
     if (!peer_server.has_value()) {
         return;
     }
 
-    //直接通知对方有文本聊天消息
+    // 对方在本节点：直接通知
     if (IsPeerLocal(peer_server)) {
-        auto psession = UserManager::GetInstance().GetSession(peer_uid);
-        if (psession) {  
-            //在内存中则直接发送通知对方
-            std::string return_str = rtvalue.toStyledString();
-            psession->SendMessage(return_str, static_cast<uint16_t>(MSG_IDS::NOTIFY_TEXT_CHAT_MSG_REQ));
+        auto psession = UserManager::GetInstance().GetSession(plan.toUid);
+        if (psession) {
+            psession->SendMessage(plan.response.toStyledString(),
+                static_cast<uint16_t>(MSG_IDS::NOTIFY_TEXT_CHAT_MSG_REQ));
         }
         return;
     }
 
-
     TextChatMsgReq text_msg_req;
-    text_msg_req.set_from_uid(self_uid);
-    text_msg_req.set_to_uid(peer_uid);
-    for (const auto& e : array) {
-        auto content = e["content"].asString();
-        auto msg_id = e["msg_id"].asString();
-        auto *text_msg = text_msg_req.add_msgs();
+    text_msg_req.set_from_uid(plan.fromUid);
+    text_msg_req.set_to_uid(plan.toUid);
+    for (const auto& [msg_id, content] : plan.msgs) {
+        auto* text_msg = text_msg_req.add_msgs();
         text_msg->set_msg_id(msg_id);
         text_msg->set_msg_content(content);
     }
-    //发送通知 todo...
-    ChatGrpcClient::GetInstance().NotifyTextChatMsg(peer_server.value(), text_msg_req, rtvalue);
-
+    ChatGrpcClient::GetInstance().NotifyTextChatMsg(peer_server.value(), text_msg_req, ctx.Response());
 }
 } // namespace P1

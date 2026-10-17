@@ -2,6 +2,8 @@
 #define _P1_CHAT_FLOW_H_
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "chat/constants.h"
@@ -36,6 +38,49 @@ struct LoginResult {
 
 // 客户端 TCP 登录：校验 token（Redis）→ 拉取本人资料 → 组装资料 + 申请列表 + 好友列表。
 LoginResult ProcessLogin(const Json::Value& req, ChatDependencies deps);
+
+// —— 好友申请 / 认证 / 文本消息（客户端可见的 JSON 契约集中在这里） ——
+
+// 加好友申请：落库 + 给申请者的回包 + 给目标用户的本地通知。
+// 跨节点通知所需的申请人资料（icon/sex/nick）由调用方在需要时再取，避免多余查询。
+struct AddFriendPlan {
+    Json::Value response;
+    Json::Value notify;
+    int32_t fromUid = 0;
+    int32_t toUid = 0;
+};
+AddFriendPlan ProcessAddFriend(const Json::Value& req, ChatDependencies deps);
+
+// 认证请求的 action：缺省视为同意（兼容旧客户端）；非 1/2 返回 -1
+int32_t ResolveAuthAction(const Json::Value& req);
+
+// 认证动作 → 申请状态（同意 1 / 拒绝 2）
+int32_t ApplyStatusForAction(int32_t action);
+
+// 好友认证：校验 action → 取申请人资料 → 更新申请状态 →（同意时）建立好友关系。
+// 通知申请者依赖会话/跨节点 RPC，留在 Handler 里。
+struct AuthFriendPlan {
+    Json::Value response;
+    Json::Value notify;
+    bool ok = false;
+    int32_t peerUid = 0;
+    int32_t selfUid = 0;
+    int32_t action = 0;
+};
+AuthFriendPlan ProcessAuthFriend(const Json::Value& req, ChatDependencies deps);
+
+// 申请者视角的认证结果通知：同意时带上处理者资料（selfInfo 为空则 error=UID_INVALID）
+Json::Value BuildAuthResultNotify(int32_t peerUid, int32_t selfUid, int32_t action,
+    const UserInfo* selfInfo);
+
+// 文本消息：回包 + 跨节点 gRPC 需要的 (msg_id, content) 列表
+struct TextChatPlan {
+    Json::Value response;
+    std::vector<std::pair<std::string, std::string>> msgs;
+    int32_t fromUid = 0;
+    int32_t toUid = 0;
+};
+TextChatPlan ProcessTextChatMsg(const Json::Value& req);
 
 // 登录响应里的申请 / 好友列表序列化（纯函数，供 HandleLogin 复用）
 void AppendApplyList(Json::Value& dst, const std::vector<std::shared_ptr<ApplyInfo>>& list);

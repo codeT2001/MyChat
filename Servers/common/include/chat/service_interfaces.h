@@ -29,6 +29,9 @@ public:
     virtual bool GetApplyList(int32_t uid, std::vector<std::shared_ptr<ApplyInfo>>& list,
         int begin, int limit) = 0;
     virtual bool GetFriendList(int32_t uid, std::vector<std::shared_ptr<UserInfo>>& list) = 0;
+    virtual bool AddFriendApply(int32_t from, int32_t to) = 0;
+    virtual bool AuthFriendApply(int32_t from, int32_t to, int32_t status) = 0;
+    virtual bool AddFriend(int32_t from, int32_t to, const std::string& backName) = 0;
 };
 
 // KV 存储（Redis 侧子集）

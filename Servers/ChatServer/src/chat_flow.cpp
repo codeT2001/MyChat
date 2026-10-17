@@ -165,6 +165,174 @@ LoginResult ProcessLogin(const Json::Value& req, ChatDependencies deps)
     return result;
 }
 
+// —— 好友申请 / 认证 / 文本消息 ——
+
+AddFriendPlan ProcessAddFriend(const Json::Value& req, ChatDependencies deps)
+{
+    AddFriendPlan plan;
+    const int32_t fromUid = req["from_uid"].asInt();
+    const int32_t toUid = req["to_uid"].asInt();
+    const std::string name = req["name"].asString();
+    const std::string desc = req["desc"].asString();
+
+    plan.fromUid = fromUid;
+    plan.toUid = toUid;
+    plan.response["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+
+    if (deps.user_store != nullptr) {
+        deps.user_store->AddFriendApply(fromUid, toUid);
+    }
+    // 目标用户本节点在线时直接收通知（字段与旧版本保持一致）
+    Json::Value& notify = plan.notify;
+    notify["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    notify["desc"] = desc;
+    notify["name"] = name;
+    notify["apply_uid"] = fromUid;
+    return plan;
+}
+
+int32_t ResolveAuthAction(const Json::Value& req)
+{
+    // 旧客户端不带 action，默认同意
+    if (!req.isMember("action")) {
+        return FRIEND_ACTION_ACCEPT;
+    }
+    // 非数字（字符串 / 布尔 / null / 对象）时 asInt() 会抛异常或按 0/1 误判，
+    // 直接判为非法 action：否则异常会冲出 handler，客户端收不到任何回包
+    const Json::Value& action = req["action"];
+    if (!action.isNumeric()) {
+        return -1;
+    }
+    const int32_t value = action.asInt();
+    if (value != FRIEND_ACTION_ACCEPT && value != FRIEND_ACTION_REJECT) {
+        return -1;
+    }
+    return value;
+}
+
+int32_t ApplyStatusForAction(int32_t action)
+{
+    return (action == FRIEND_ACTION_ACCEPT) ? APPLY_STATUS_ACCEPTED : APPLY_STATUS_REJECTED;
+}
+
+AuthFriendPlan ProcessAuthFriend(const Json::Value& req, ChatDependencies deps)
+{
+    AuthFriendPlan plan;
+    const int32_t peerUid = req["from_uid"].asInt();  // 申请者
+    const int32_t selfUid = req["to_uid"].asInt();    // 处理者（本人）
+    const std::string remarkName = req["remark_name"].asString();
+
+    plan.peerUid = peerUid;
+    plan.selfUid = selfUid;
+    plan.response["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+
+    const int32_t action = ResolveAuthAction(req);
+    if (action < 0) {
+        LOG_WARN("[LogicSystem] HandleAuthFriend invalid action, from:%d, to:%d", peerUid, selfUid);
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::ERROR_JSON);
+        return plan;
+    }
+    plan.action = action;
+
+    // 响应里需要带【申请人】的 id/资料，客户端据此在申请列表中定位并更新该条申请
+    std::shared_ptr<UserInfo> userInfo;
+    const std::string peerKey = std::string(USER_INFO_PREFIX) + std::to_string(peerUid);
+    if (!LoadBaseUserInfo(peerKey, peerUid, userInfo, deps)) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return plan;
+    }
+    plan.response["uid"] = peerUid;
+    plan.response["from_uid"] = peerUid;  // 申请人
+    plan.response["to_uid"] = selfUid;    // 处理者（本人）
+    plan.response["name"] = userInfo->name;
+    plan.response["nick"] = userInfo->nick;
+    plan.response["icon"] = userInfo->icon;
+    plan.response["sex"] = userInfo->sex;
+    plan.response["action"] = action;
+
+    if (deps.user_store == nullptr) {
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return plan;
+    }
+
+    // 1) 同步申请状态：同意置 1，拒绝置 2
+    const int32_t applyStatus = ApplyStatusForAction(action);
+    if (!deps.user_store->AuthFriendApply(peerUid, selfUid, applyStatus)) {
+        LOG_WARN("[LogicSystem] HandleAuthFriend update apply status failed, from:%d, to:%d, action:%d",
+            peerUid, selfUid, action);
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return plan;
+    }
+
+    // 2) 同意才建立好友关系；拒绝不建立
+    if (action == FRIEND_ACTION_ACCEPT &&
+        !deps.user_store->AddFriend(peerUid, selfUid, remarkName)) {
+        LOG_WARN("[LogicSystem] HandleAuthFriend AddFriend failed, from:%d, to:%d", peerUid, selfUid);
+        plan.response["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        return plan;
+    }
+    LOG_INFO("[LogicSystem] HandleAuthFriend %s, from:%d, to:%d",
+        action == FRIEND_ACTION_ACCEPT ? "accepted" : "rejected", peerUid, selfUid);
+
+    // 通知内容（发给申请者）：同意时带【处理者本人】的资料，拒绝时只需 id + action
+    if (action == FRIEND_ACTION_ACCEPT) {
+        std::shared_ptr<UserInfo> selfInfo;
+        const std::string selfKey = std::string(USER_INFO_PREFIX) + std::to_string(selfUid);
+        const bool loaded = LoadBaseUserInfo(selfKey, selfUid, selfInfo, deps);
+        plan.notify = BuildAuthResultNotify(peerUid, selfUid, action, loaded ? selfInfo.get() : nullptr);
+    } else {
+        plan.notify = BuildAuthResultNotify(peerUid, selfUid, action, nullptr);
+    }
+    plan.ok = true;
+    return plan;
+}
+
+Json::Value BuildAuthResultNotify(int32_t peerUid, int32_t selfUid, int32_t action,
+    const UserInfo* selfInfo)
+{
+    Json::Value val;
+    val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    val["action"] = action;
+    // 统一语义：from_uid=申请人（即接收通知者自己），to_uid=处理者
+    val["from_uid"] = peerUid;
+    val["to_uid"] = selfUid;
+    // 同意才携带处理者资料（客户端据此建好友会话）；拒绝只需 id + action
+    if (action == FRIEND_ACTION_ACCEPT) {
+        if (selfInfo == nullptr) {
+            val["error"] = static_cast<int32_t>(ErrorCodes::UID_INVALID);
+        } else {
+            val["name"] = selfInfo->name;
+            val["desc"] = selfInfo->desc;
+            val["nick"] = selfInfo->nick;
+            val["icon"] = selfInfo->icon;
+            val["sex"] = selfInfo->sex;
+        }
+    }
+    return val;
+}
+
+TextChatPlan ProcessTextChatMsg(const Json::Value& req)
+{
+    TextChatPlan plan;
+    const int32_t selfUid = req["from_uid"].asInt();  // 发送者
+    const int32_t peerUid = req["to_uid"].asInt();    // 接收者
+    const Json::Value array = req["text_array"];
+    plan.fromUid = selfUid;
+    plan.toUid = peerUid;
+    plan.response["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    plan.response["text_array"] = array;
+    plan.response["from_uid"] = selfUid;
+    plan.response["to_uid"] = peerUid;
+
+    if (array.isArray()) {
+        plan.msgs.reserve(array.size());
+        for (const auto& e : array) {
+            plan.msgs.emplace_back(e["msg_id"].asString(), e["content"].asString());
+        }
+    }
+    return plan;
+}
+
 void AppendApplyList(Json::Value& dst, const std::vector<std::shared_ptr<ApplyInfo>>& list)
 {
     for (const auto& apply : list) {

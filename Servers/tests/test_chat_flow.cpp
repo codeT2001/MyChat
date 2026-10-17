@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <tuple>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -42,6 +43,15 @@ public:
     int getApplyListCalls = 0;
     int getFriendListCalls = 0;
 
+    // 好友申请 / 认证：可注入失败，并记录调用参数
+    bool authFriendApplyOk = true;
+    bool addFriendOk = true;
+    int addFriendApplyCalls = 0;
+    int32_t lastApplyFrom = -1;
+    int32_t lastApplyTo = -1;
+    std::vector<std::tuple<int32_t, int32_t, int32_t>> authFriendApplyArgs;
+    std::vector<std::tuple<int32_t, int32_t, std::string>> addFriendArgs;
+
     int RegisterUser(const std::string&, const std::string&, const std::string&, const std::string&) override { return -1; }
     bool CheckEmail(const std::string&, const std::string&) override { return false; }
     bool UpdatePassword(const std::string&, const std::string&) override { return false; }
@@ -59,6 +69,26 @@ public:
         ++getFriendListCalls;
         out = friendList;
         return !friendList.empty();
+    }
+
+    bool AddFriendApply(int32_t from, int32_t to) override
+    {
+        ++addFriendApplyCalls;
+        lastApplyFrom = from;
+        lastApplyTo = to;
+        return true;
+    }
+
+    bool AuthFriendApply(int32_t from, int32_t to, int32_t status) override
+    {
+        authFriendApplyArgs.emplace_back(from, to, status);
+        return authFriendApplyOk;
+    }
+
+    bool AddFriend(int32_t from, int32_t to, const std::string& backName) override
+    {
+        addFriendArgs.emplace_back(from, to, backName);
+        return addFriendOk;
     }
 
     std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid) override
@@ -106,6 +136,7 @@ public:
 };
 
 struct Fixture {
+    static constexpr int32_t kNoAction = -999;
     FakeUserStore userStore;
     FakeKvStore kvStore;
 
@@ -129,6 +160,42 @@ struct Fixture {
     std::string TokenKey(int32_t uid) const
     {
         return std::string(P1::USER_TOKEN_PREFIX) + std::to_string(uid);
+    }
+
+    Json::Value AddFriendRequest(int32_t fromUid, int32_t toUid)
+    {
+        Json::Value req;
+        req["from_uid"] = fromUid;
+        req["to_uid"] = toUid;
+        req["name"] = "applicant";
+        req["desc"] = "please add me";
+        req["remark_name"] = "remark";
+        return req;
+    }
+
+    // action < 0 表示不带 action 字段（旧客户端）
+    Json::Value AuthRequest(int32_t peerUid, int32_t selfUid, int32_t action = kNoAction)
+    {
+        Json::Value req;
+        req["from_uid"] = peerUid;
+        req["to_uid"] = selfUid;
+        req["remark_name"] = "remark";
+        if (action != kNoAction) {
+            req["action"] = action;
+        }
+        return req;
+    }
+
+    Json::Value TextChatRequest(int32_t fromUid, int32_t toUid)
+    {
+        Json::Value req;
+        req["from_uid"] = fromUid;
+        req["to_uid"] = toUid;
+        Json::Value msg;
+        msg["msg_id"] = "m1";
+        msg["content"] = "hello";
+        req["text_array"].append(msg);
+        return req;
     }
 
     static FakeUser MakeUser(int32_t uid, const std::string& name)
@@ -212,6 +279,243 @@ TESTFW_TEST(SearchUser_null_dependencies_is_safe)
 {
     const Json::Value rsp = P1::ProcessSearchUser(Fixture().SearchRequest("1001"), ChatDependencies {});
     CHECK_EQ(rsp["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+}
+
+// —— 加好友申请 ——
+TESTFW_TEST(AddFriend_writes_apply_and_builds_notify)
+{
+    Fixture f;
+    const P1::AddFriendPlan plan = P1::ProcessAddFriend(f.AddFriendRequest(1001, 1002), f.deps());
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.fromUid, 1001);
+    CHECK_EQ(plan.toUid, 1002);
+    CHECK_EQ(f.userStore.addFriendApplyCalls, 1);
+    CHECK_EQ(f.userStore.lastApplyFrom, 1001);
+    CHECK_EQ(f.userStore.lastApplyTo, 1002);
+    CHECK_EQ(plan.notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.notify["name"].asString(), std::string("applicant"));
+    CHECK_EQ(plan.notify["desc"].asString(), std::string("please add me"));
+    CHECK_EQ(plan.notify["apply_uid"].asInt(), 1001);
+}
+
+// —— 认证动作解析 / 状态映射 ——
+TESTFW_TEST(ResolveAuthAction_defaults_to_accept)
+{
+    Fixture f;
+    CHECK_EQ(P1::ResolveAuthAction(f.AuthRequest(1, 2)), P1::FRIEND_ACTION_ACCEPT);
+    CHECK_EQ(P1::ResolveAuthAction(f.AuthRequest(1, 2, 1)), P1::FRIEND_ACTION_ACCEPT);
+    CHECK_EQ(P1::ResolveAuthAction(f.AuthRequest(1, 2, 2)), P1::FRIEND_ACTION_REJECT);
+}
+
+TESTFW_TEST(ResolveAuthAction_rejects_invalid_values)
+{
+    Fixture f;
+    for (const int32_t bad : { 0, 3, -1, 100 }) {
+        CHECK_EQ(P1::ResolveAuthAction(f.AuthRequest(1, 2, bad)), -1);
+    }
+}
+
+TESTFW_TEST(ResolveAuthAction_handles_non_numeric_action_without_throwing)
+{
+    // 非数字 action 不能把异常抛出 handler（旧实现 asInt() 会抛，客户端收不到回包）
+    Json::Value req;
+    req["action"] = "1";                  // 字符串：旧实现 asInt() 直接抛异常
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+
+    req["action"] = "accept";
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+
+    req["action"] = true;                 // 布尔：旧实现会误判成 1（同意）
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+
+    req["action"] = Json::Value();        // null
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+
+    Json::Value nested;
+    nested["a"] = 1;
+    req["action"] = nested;               // object
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+}
+
+TESTFW_TEST(ResolveAuthAction_accepts_real_numbers)
+{
+    Json::Value req;
+    req["action"] = 1.0;                  // JSON 实数形式的 1
+    CHECK_EQ(P1::ResolveAuthAction(req), P1::FRIEND_ACTION_ACCEPT);
+    req["action"] = 3.7;                  // 非整数实数 → 非法
+    CHECK_EQ(P1::ResolveAuthAction(req), -1);
+}
+
+TESTFW_TEST(ApplyStatusForAction_maps_accept_and_reject)
+{
+    CHECK_EQ(P1::ApplyStatusForAction(P1::FRIEND_ACTION_ACCEPT), P1::APPLY_STATUS_ACCEPTED);
+    CHECK_EQ(P1::ApplyStatusForAction(P1::FRIEND_ACTION_REJECT), P1::APPLY_STATUS_REJECTED);
+}
+
+// —— 认证结果通知 ——
+TESTFW_TEST(BuildAuthResultNotify_accept_carries_profile)
+{
+    UserInfo self;
+    self.uid = 1002;
+    self.name = "me";
+    self.nick = "n_me";
+    self.desc = "d_me";
+    self.icon = "i_me";
+    self.sex = 1;
+
+    const Json::Value notify = P1::BuildAuthResultNotify(1001, 1002, P1::FRIEND_ACTION_ACCEPT, &self);
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(notify["action"].asInt(), P1::FRIEND_ACTION_ACCEPT);
+    CHECK_EQ(notify["from_uid"].asInt(), 1001);   // 接收通知者（申请人）自己
+    CHECK_EQ(notify["to_uid"].asInt(), 1002);
+    CHECK_EQ(notify["name"].asString(), std::string("me"));
+    CHECK_EQ(notify["nick"].asString(), std::string("n_me"));
+    CHECK_EQ(notify["desc"].asString(), std::string("d_me"));
+    CHECK_EQ(notify["icon"].asString(), std::string("i_me"));
+    CHECK_EQ(notify["sex"].asInt(), 1);
+}
+
+TESTFW_TEST(BuildAuthResultNotify_reject_has_no_profile)
+{
+    const Json::Value notify = P1::BuildAuthResultNotify(1001, 1002, P1::FRIEND_ACTION_REJECT, nullptr);
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(notify["action"].asInt(), P1::FRIEND_ACTION_REJECT);
+    CHECK(!notify.isMember("name"));
+    CHECK(!notify.isMember("icon"));
+}
+
+TESTFW_TEST(BuildAuthResultNotify_accept_without_profile_reports_error)
+{
+    const Json::Value notify = P1::BuildAuthResultNotify(1001, 1002, P1::FRIEND_ACTION_ACCEPT, nullptr);
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK_EQ(notify["action"].asInt(), P1::FRIEND_ACTION_ACCEPT);
+}
+
+// —— 好友认证 ——
+TESTFW_TEST(AuthFriend_invalid_action_returns_error_json)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 3), f.deps());
+    CHECK(!plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::ERROR_JSON));
+    CHECK(f.userStore.authFriendApplyArgs.empty());  // 非法 action 不落库
+    CHECK(f.userStore.addFriendArgs.empty());
+}
+
+TESTFW_TEST(AuthFriend_peer_not_found_returns_uid_invalid)
+{
+    Fixture f;
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    CHECK(!plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK(f.userStore.authFriendApplyArgs.empty());
+}
+
+TESTFW_TEST(AuthFriend_accept_updates_apply_and_adds_friend)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    CHECK(plan.ok);
+    CHECK_EQ(plan.peerUid, 2001);
+    CHECK_EQ(plan.selfUid, 1001);
+    CHECK_EQ(plan.action, P1::FRIEND_ACTION_ACCEPT);
+
+    // 回包带申请人资料，客户端据此更新申请列表
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.response["uid"].asInt(), 2001);
+    CHECK_EQ(plan.response["from_uid"].asInt(), 2001);
+    CHECK_EQ(plan.response["to_uid"].asInt(), 1001);
+    CHECK_EQ(plan.response["name"].asString(), std::string("peer"));
+    CHECK_EQ(plan.response["action"].asInt(), P1::FRIEND_ACTION_ACCEPT);
+
+    CHECK_EQ(f.userStore.authFriendApplyArgs.size(), 1u);
+    CHECK_EQ(std::get<0>(f.userStore.authFriendApplyArgs[0]), 2001);
+    CHECK_EQ(std::get<1>(f.userStore.authFriendApplyArgs[0]), 1001);
+    CHECK_EQ(std::get<2>(f.userStore.authFriendApplyArgs[0]), P1::APPLY_STATUS_ACCEPTED);
+    CHECK_EQ(f.userStore.addFriendArgs.size(), 1u);
+    CHECK_EQ(std::get<2>(f.userStore.addFriendArgs[0]), std::string("remark"));
+
+    // 通知申请人：同意时带处理者（本人）资料
+    CHECK_EQ(plan.notify["action"].asInt(), P1::FRIEND_ACTION_ACCEPT);
+    CHECK_EQ(plan.notify["from_uid"].asInt(), 2001);
+    CHECK_EQ(plan.notify["to_uid"].asInt(), 1001);
+    CHECK_EQ(plan.notify["name"].asString(), std::string("me"));
+}
+
+TESTFW_TEST(AuthFriend_reject_does_not_add_friend)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 2), f.deps());
+    CHECK(plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.response["action"].asInt(), P1::FRIEND_ACTION_REJECT);
+    CHECK_EQ(f.userStore.authFriendApplyArgs.size(), 1u);
+    CHECK_EQ(std::get<2>(f.userStore.authFriendApplyArgs[0]), P1::APPLY_STATUS_REJECTED);
+    CHECK(f.userStore.addFriendArgs.empty());   // 拒绝不建立好友关系
+    CHECK(!plan.notify.isMember("name"));       // 拒绝通知不带资料
+    CHECK_EQ(plan.notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+}
+
+TESTFW_TEST(AuthFriend_apply_update_failure_returns_uid_invalid)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+    f.userStore.authFriendApplyOk = false;
+
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    CHECK(!plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK(f.userStore.addFriendArgs.empty());
+}
+
+TESTFW_TEST(AuthFriend_add_friend_failure_returns_uid_invalid)
+{
+    Fixture f;
+    f.userStore.users.push_back(Fixture::MakeUser(2001, "peer"));
+    f.userStore.users.push_back(Fixture::MakeUser(1001, "me"));
+    f.userStore.addFriendOk = false;
+
+    const P1::AuthFriendPlan plan = P1::ProcessAuthFriend(f.AuthRequest(2001, 1001, 1), f.deps());
+    CHECK(!plan.ok);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::UID_INVALID));
+    CHECK_EQ(f.userStore.addFriendArgs.size(), 1u);
+}
+
+// —— 文本消息 ——
+TESTFW_TEST(TextChatMsg_builds_response_and_extracts_msgs)
+{
+    Fixture f;
+    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(f.TextChatRequest(1001, 2001));
+    CHECK_EQ(plan.fromUid, 1001);
+    CHECK_EQ(plan.toUid, 2001);
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.response["from_uid"].asInt(), 1001);
+    CHECK_EQ(plan.response["to_uid"].asInt(), 2001);
+    CHECK_EQ(plan.response["text_array"].size(), 1u);
+    CHECK_EQ(plan.msgs.size(), 1u);
+    CHECK_EQ(plan.msgs[0].first, std::string("m1"));
+    CHECK_EQ(plan.msgs[0].second, std::string("hello"));
+}
+
+TESTFW_TEST(TextChatMsg_handles_missing_or_bad_text_array)
+{
+    Fixture f;
+    Json::Value req = f.TextChatRequest(1001, 2001);
+    req.removeMember("text_array");
+    const P1::TextChatPlan plan = P1::ProcessTextChatMsg(req);
+    CHECK(plan.msgs.empty());
+    CHECK_EQ(plan.response["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(plan.response["to_uid"].asInt(), 2001);
 }
 
 // —— 用户基础资料：Redis 缓存 + MySQL 回填 ——
