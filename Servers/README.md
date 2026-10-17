@@ -108,6 +108,7 @@ chat/
 │   │   ├── asio_io_context_pool.h #   - Asio I/O 线程池
 │   │   ├── password_crypto.h      #   - 口令摘要 SHA-256(固定盐) + 恒定时间比较
 │   │   ├── service_interfaces.h   #   - 基础设施接口层（IUserStore/IKeyValueStore/IVerifyCodeService/IChatServerRouter）
+│   │   ├── session_registry.h     #   - uid → 会话注册表模板（纯逻辑，可单测）
 │   │   ├── status_grpc_client.h   #   - StatusServer gRPC 客户端
 │   │   └── verify_grpc_client.h   #   - VerifyServer gRPC 客户端
 │   ├── src/                       # 公共实现
@@ -119,7 +120,7 @@ chat/
 │       ├── cserver.h/cpp          #   - TCP server，session 生命周期
 │       ├── csession.h/cpp         #   - 连接会话，包头/JSON 读写
 │       ├── msg_node.h/cpp         #   - 消息节点
-│       ├── user_manager.h/cpp     #   - uid → session 映射
+│       ├── user_manager.h/cpp     #   - uid → session 映射（用 SessionRegistry）
 │       ├── logic_system.h/cpp     #   - 登录/搜人/好友申请/认证
 │       ├── chat_flow.h/cpp        #   - 可单测的纯业务函数（搜人/登录/加好友/认证/文本消息）
 │       ├── chat_grpc_client.h/cpp #   - 向其他 ChatServer 发起 gRPC
@@ -130,6 +131,7 @@ chat/
 │   └── src/
 │       ├── cserver.h/cpp          #   - HTTP server
 │       ├── http_connection.h/cpp  #   - HTTP 连接与请求分发
+│       ├── http_params.h/cpp      #   - URL 解码 / 查询串解析（纯函数）
 │       ├── gate_flow.h/cpp        #   - 可单测的纯业务函数（注册/登录/重置/验证码）
 │       └── logic_system.h/cpp     #   - 注册/登录/重置/验证码 Handler（薄壳）
 │

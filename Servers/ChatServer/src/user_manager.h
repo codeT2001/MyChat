@@ -1,9 +1,10 @@
 #ifndef _P1_USER_MANAGER_H_
 #define _P1_USER_MANAGER_H_
 
-#include <unordered_map>
+#include <cstdint>
 #include <memory>
-#include <mutex>
+
+#include "chat/session_registry.h"
 namespace P1 {
 class CSession;
 class UserManager final
@@ -21,8 +22,7 @@ public:
 	bool RmvUserSession(int32_t uid, const std::shared_ptr<CSession>& session);
 private:	
 	UserManager();
-	std::mutex session_mtx_;
-	std::unordered_map<int32_t, std::shared_ptr<CSession>> uid_to_session_;
+	SessionRegistry<std::shared_ptr<CSession>> sessions_;
 };
 } // namespace P1
 #endif // _P1_USER_MANAGER_H_

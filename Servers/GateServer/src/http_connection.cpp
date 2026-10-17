@@ -1,85 +1,13 @@
 #include "http_connection.h"
 
-#include <cassert>
-#include <cctype>
-#include <iomanip>
-#include <optional>
-#include <sstream>
+#include <cstdint>
+#include <string>
+#include <utility>
 
 #include "chat/log.h"
+#include "http_params.h"
 #include "logic_system.h"
 namespace P1 {
-namespace { // ---------- 十六进制字符 ↔ 数值 ----------
-
-template<bool Upper = true>
-constexpr char ToHex(unsigned char x) noexcept
-{
-    assert(x < 16);
-    constexpr char base = Upper ? 'A' : 'a';
-    return static_cast<char>(x > 9 ? (x - 10 + base) : (x + '0'));
-}
-
-constexpr std::optional<unsigned char> FromHex(char c) noexcept
-{
-    if (c >= '0' && c <= '9') {
-        return static_cast<unsigned char>(c - '0');
-    }
-    if (c >= 'A' && c <= 'F') {
-        return static_cast<unsigned char>(c - 'A' + 10);
-    }
-    if (c >= 'a' && c <= 'f') {
-        return static_cast<unsigned char>(c - 'a' + 10);
-    }
-    return std::nullopt;
-}
-
-// ---------- URL 编码 ----------
-inline std::string UrlEncode(const std::string& src, bool upper_hex = true)
-{
-    std::ostringstream oss;
-    oss.fill('0');
-    oss << std::hex << (upper_hex ? std::uppercase : std::nouppercase);
-
-    for (unsigned char c : src) {
-        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
-            oss << static_cast<char>(c);
-        } else if (c == ' ') {
-            oss << '+';
-        } else {
-            oss << '%' << (upper_hex ? ToHex<true>(c >> 4) : static_cast<char>(ToHex<false>(c >> 4)))
-                << (upper_hex ? ToHex<true>(c & 0x0F) : static_cast<char>(ToHex<false>(c & 0x0F)));
-        }
-    }
-    return oss.str();
-}
-
-// ---------- URL 解码 ----------
-inline std::string UrlDecode(const std::string& src)
-{
-    std::ostringstream oss;
-    for (size_t i = 0; i < src.size(); ++i) {
-        if (src[i] == '+') {
-            oss << ' ';
-        } else if (src[i] == '%') {
-            if (i + 2 >= src.size()) {
-                oss << '%';
-                continue;
-            }
-            auto high = FromHex(src[++i]);
-            auto low = FromHex(src[++i]);
-            if (!high || !low) {
-                oss << '%' << src[i - 1] << src[i];
-                continue;
-            }
-            oss << static_cast<char>((*high << 4) + *low);
-        } else {
-            oss << src[i];
-        }
-    }
-    return oss.str();
-}
-
-} // namespace
 
 // HttpConnection
 HttpConnection::HttpConnection(std::shared_ptr<boost::asio::io_context> ioc) : socket_(ioc->get_executor()) {}
@@ -159,35 +87,13 @@ void HttpConnection::HandleRequest()
 
 void HttpConnection::PreParseGetParams()
 {
-    /* 提取 URI:  /get_test?key1=value1&key2=value2  */
-    auto uri = request_.target();
-
-    /* 分割路径与查询串 */
-    auto queryPos = uri.find('?');
-    if (queryPos == std::string::npos) {
-        getUrl_ = std::string(uri);
-        return;
-    }
-
-    getUrl_ = std::string(uri.substr(0, queryPos));
-    std::string_view querySv { uri.data() + queryPos + 1, uri.size() - queryPos - 1 };
-
-    /* 解析 key=value 对 */
-    while (!querySv.empty()) {
-        auto andPos = querySv.find('&');
-        auto pairSv = querySv.substr(0, andPos); // 取 "&" 前一段
-
-        auto eqPos = pairSv.find('=');
-        if (eqPos != std::string_view::npos) {
-            auto key = UrlDecode(std::string { pairSv.substr(0, eqPos) });
-            auto value = UrlDecode(std::string { pairSv.substr(eqPos + 1) });
-            getParams_[key] = value;
-        }
-
-        if (andPos == std::string_view::npos) {
-            break;
-        }
-        querySv.remove_prefix(andPos + 1); // 跳过 "&"
-    }
+    /* 提取 URI:  /get_test?key1=value1&key2=value2 —— 解析逻辑见 http_params.cpp */
+    // beast 的 target() 是 beast::string_view，这里显式转成 std::string_view，
+    // 保证解析逻辑（http_params）不依赖 beast
+    const auto rawTarget = request_.target();
+    const ParsedTarget parsed =
+        ParseRequestTarget(std::string_view(rawTarget.data(), rawTarget.size()));
+    getUrl_ = parsed.path;
+    getParams_ = parsed.params;
 }
 } // namespace P1

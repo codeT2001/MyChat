@@ -86,3 +86,14 @@ chat_add_test(test_msg_codec
     ${TEST_SRC_DIR}/test_msg_codec.cpp
     ${REPO_SERVER_DIR}/ChatServer/src/msg_codec.cpp)
 target_include_directories(test_msg_codec PRIVATE ${REPO_SERVER_DIR}/ChatServer/src)
+
+# URL 解码 / 查询串解析（GateServer 纯逻辑）
+chat_add_test(test_http_params
+    ${TEST_SRC_DIR}/test_http_params.cpp
+    ${REPO_SERVER_DIR}/GateServer/src/http_params.cpp)
+target_include_directories(test_http_params PRIVATE ${REPO_SERVER_DIR}/GateServer/src)
+
+# uid → 会话 注册表（模板，纯逻辑；覆盖顶号语义）
+chat_add_test(test_session_registry
+    ${TEST_SRC_DIR}/test_session_registry.cpp)
+target_include_directories(test_session_registry PRIVATE ${REPO_SERVER_DIR}/common/include)
