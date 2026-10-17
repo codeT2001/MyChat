@@ -43,7 +43,7 @@ chat/
 ├── Client/                     # Qt 6 / C++17 桌面客户端
 │   ├── src/  inc/              #   实现与头文件
 │   ├── ui/  style/  images/    #   Designer 界面、QSS 样式、图片资源
-│   ├── tests/                  #   CTest 单元测试（Qt Test，契约/编解码/工具/数据层，默认启用）
+│   ├── tests/                  #   CTest 单元测试（Qt Test，契约/编解码/工具/数据层/离屏界面，默认启用）
 │   └── README.md               #   客户端文档（架构图 + 关键操作时序图）
 │
 └── Servers/                    # 服务端集群（顶层 CMakeLists 在此）
@@ -264,7 +264,7 @@ ss -ltnp | grep -E '9090|50061|50062|50051|50052'
 **离线即可运行**（无需起任何服务）。
 
 ```bash
-# 客户端 C++（CTest + Qt Test，只编译被测的纯逻辑源文件）
+# 客户端 C++（CTest + Qt Test：纯逻辑 + 离屏界面交互）
 cd Client
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -287,7 +287,7 @@ TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询�
 帧编解码与帧长上限、JSON 请求序列化与回包解析、表单校验与服务器地址、`UserManager` 分页与备注、
 `rc.qrc` 资源登记，以及离屏点击级的界面交互（登录框校验/密码可见性/跳转信号、倒计时按钮、回车发送、
 主面板切页/搜索/进入会话）；Node 侧覆盖验证码与跨语言错误码契约。
-清单见 [`Servers/README.md`](Servers/README.md#单元测试) 与 [`Client/README.md`](Client/README.md#单元测试)。
+清单见 [`Servers/README.md`](Servers/README.md#单元测试) 与 [`Client/README.md`](Client/README.md#十单元与界面测试)。
 
 改动后的最低要求：服务端 `-j1` 编译通过 + `ctest` 全绿，客户端 `cmake --build build` 通过 + `ctest` 全绿；
 测试用到的纯逻辑文件见 `Servers/AGENTS.md` / `Client/AGENTS.md`。

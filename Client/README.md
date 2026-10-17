@@ -18,7 +18,7 @@
 - [七、数据模型（domainmodels.h）](#七数据模型domainmodelsh)
 - [八、模块清单](#八模块清单)
 - [九、构建与运行](#九构建与运行)
-- [十、单元测试](#十单元测试)
+- [十、单元与界面测试](#十单元与界面测试)
 - [十一、已知问题与不一致](#十一已知问题与不一致)
 
 ---
@@ -33,7 +33,7 @@
 | HTTP | `QNetworkAccessManager`（异步，信号槽回调） |
 | TCP | `QTcpSocket` + `QDataStream`（自定义二进制帧，大端） |
 | JSON | `QJsonDocument` / `QJsonObject` |
-| 测试 | CTest + Qt Test（`Qt6::Test`，只编译纯逻辑源文件，离线可跑） |
+| 测试 | CTest + Qt Test（`Qt6::Test`，纯逻辑 + 离屏界面交互，离线可跑） |
 | 设计模式 | Meyers 单例、信号槽、业务编排（Service）、setup-method |
 
 ---
@@ -546,7 +546,7 @@ Windows PowerShell 用 `$env:CHAT_SERVER_HOST = "127.0.0.1"`。地址每次请�
 
 ---
 
-## 十、单元测试
+## 十、单元与界面测试
 
 测试分两层：**纯逻辑**（JSON/帧编解码、工具函数、`UserManager`、协议契约）与
 **界面交互**（用 QTest 派发真实鼠标/键盘事件：登录框、倒计时按钮、输入框、主面板切页/搜索/进入会话）。
@@ -563,7 +563,7 @@ ctest --test-dir build --output-on-failure
 - 默认开启；`-DBUILD_TESTING=OFF` 可只构建客户端。
 - 每个测试同时写一份文本日志到 `build/tests/reports/<测试名>.txt`（部分终端抓不到 Qt Test 的 stdout，
   失败时看这份日志里的 `Actual` / `Expected` 与失败行号）。
-- 用例清单见 `tests/CMakeLists.txt`；被测的纯逻辑文件新增/改名时同步修改该文件。
+- 用例清单与目标依赖见 `tests/CMakeLists.txt`；新增/改名被测源文件或界面组件时同步修改该文件。
 
 | 测试 | 覆盖 |
 |---|---|
