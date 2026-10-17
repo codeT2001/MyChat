@@ -8,7 +8,7 @@ GateServer 是客户端访问系统的 **HTTP 网关**（Boost.Beast，默认 :9
 
 | 模块 | 说明 |
 |---|---|
-| CServer | HTTP 服务器，Asio 线程池 accept |
+| CServer | HTTP 服务器；主 `io_context` 单线程 accept，连接轮询分配到 Asio I/O 线程池 |
 | HttpConnection | 单连接生命周期：读请求 → 交 LogicSystem 分发 → 写响应并关闭 |
 | HttpParams | `http_params.*`：URL 解码与查询串解析（纯函数，有单测） |
 | LogicSystem | 维护 GET/POST 路由表，执行业务 Handler；`HttpJsonContext` 统一解析与回包 |
@@ -158,6 +158,7 @@ sequenceDiagram
 
 - Handler 已全部用 `HttpJsonContext` 兜底写响应，新增错误分支直接 `return`
 - 业务判定写在 `gate_flow.*` 的纯函数里，Handler 只做解析与回包；新增分支请同步补 `tests/test_gate_flow.cpp`
+- 线程模型：Handler 在 `AsioIOContextPool`（默认 2 线程）的 `async_read` 回调内同步执行，当前不额外使用业务线程池；慢 MySQL / Redis / gRPC 会占用 I/O 线程，压测后再评估调整 I/O 线程数或有界业务线程池
 - 请求体可能含密码，日志只打印 email/name，**禁止打印整个 body**
 - 无 TLS、无 CORS 头、无限流——生产建议前置 Nginx（终止 TLS、限流、CORS）
 - 单线程编译验证：`cmake --build build --target gateServer -j1`
