@@ -27,3 +27,9 @@ add_subdirectory(GateServer)
 add_subdirectory(StatusServer)
 
 message(STATUS "=== chat project configuration complete ===")
+
+# --- 单元测试（CTest）：默认开启，-DBUILD_TESTING=OFF 关闭 ---
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

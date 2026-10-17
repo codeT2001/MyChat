@@ -91,7 +91,8 @@ graph TB
 
 ```
 chat/
-├── CMakeLists.txt                 # 顶层 CMake（add_subdirectory: common → 3 servers）
+├── CMakeLists.txt                 # 顶层 CMake（add_subdirectory: common → 3 servers → tests）
+├── tests/                         # CTest 单元测试（零框架依赖，默认启用，见 AGENTS.md#测试）
 │
 ├── common/                        # 公共静态库 libchat_common.a
 │   ├── CMakeLists.txt             # 定义静态库 + proto 自动生成

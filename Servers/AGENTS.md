@@ -38,8 +38,21 @@ cmake --build build -j$(nproc)
 ./stop.sh     # 反序优雅停止（不停 Redis/MySQL）
 ```
 
-- 无自动化测试、无 lint 配置；改动依靠编译 + 手工回归验证。
+- 有基于 **CTest** 的单元测试（`tests/`，零外部框架依赖，默认随构建启用）；改动应至少「单测 + 编译」通过，再做必要的手工回归。无 lint 配置。
 - 验证编译：`cmake --build build --target <gateServer|chatServer|statusServer> -j1`。
+
+### 测试
+
+```bash
+cmake -S . -B build -G Ninja          # 默认启用测试；-DBUILD_TESTING=OFF 关闭
+cmake --build build -j1
+ctest --test-dir build --output-on-failure
+```
+
+测试只编译被测的「纯逻辑」源文件（如 `password_crypto` / `msg_node` / `config_manager` / 协议常量），
+不依赖 DB/Redis/gRPC，可离线快速运行。新增用例：在 `tests/` 加 `test_*.cpp`
+（用 `TESTFW_TEST` 定义用例、`CHECK` / `CHECK_EQ` 断言），并在 `tests/CMakeLists.txt`
+用 `chat_add_test(<name> <sources...>)` 注册；用例若需外部依赖，在其目标上自行 `find_package` / `target_link_libraries`。
 
 ## 代码约定
 
