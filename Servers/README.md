@@ -10,7 +10,7 @@
 
 - **用户认证**：注册、登录、密码重置（邮箱验证码）
 - **负载均衡接入**：StatusServer 按在线人数把新连接分配给最空闲的 ChatServer
-- **分布式聊天节点**：ChatServer 可水平扩展，通过 Redis 节点注册表动态发现对端；跨节点通知默认写入目标的 `chat:push:{node}` Stream，由 consumer group 异步投递，gRPC 保留为灰度与回滚通道
+- **分布式聊天节点**：ChatServer 可水平扩展，通过 Redis 节点注册表动态发现对端；跨节点通知默认写入目标的 `chat:push:{node}` Stream，由 consumer group 异步投递，gRPC 保留为显式直连通道
 - **好友系统**：搜索用户、申请、同意/拒绝（`action=1/2`），拒绝后重新申请自动复位
 - **持久化与缓存**：MySQL 存用户与好友关系；Redis 存验证码 / token / 用户资料 / 路由 / 在线计数
 - **顶号**：重复登录不拒绝，自动踢掉旧会话
@@ -74,7 +74,7 @@ graph TB
     Chat2 -- "XADD chat:push:ChatServer1" --> Redis
     Redis -- "XGROUP/XREADGROUP<br/>异步事件投递" --> Chat1
     Redis -- "XGROUP/XREADGROUP<br/>异步事件投递" --> Chat2
-    Chat1 -.->|"gRPC ChatService（NotifyTransport=grpc 回滚）"| Chat2
+    Chat1 -.->|"gRPC ChatService（NotifyTransport=grpc 直连）"| Chat2
 ```
 
 **三个 C++ server 都依赖 `libchat_common.a`**，公共代码通过 `target_link_libraries(... chat_common)` 传递。
@@ -131,7 +131,7 @@ chat/
 │       ├── chat_event_bus.h/cpp      # - Redis Stream 发布端
 │       ├── chat_event_consumer.h/cpp # - consumer group、ACK、重试、死信
 │       ├── chat_notifier.h/cpp       # - 通知落地的共用逻辑
-│       ├── chat_grpc_client.h/cpp    # - gRPC 回滚通道与节点发现
+│       ├── chat_grpc_client.h/cpp    # - gRPC 直连通道与节点发现
 │       └── chat_service_impl.h/cpp   # - 处理其他 ChatServer 的 gRPC 通知
 │
 ├── GateServer/                    # HTTP 网关服务（业务层）
@@ -241,7 +241,7 @@ service StatusService {
   rpc Login(LoginReq) returns (LoginRsp);                          // 校验 token（TCP 登录时由 ChatServer 调用）
 }
 
-service ChatService {  // ChatServer 节点间直连通道（NotifyTransport=grpc 灰度/回滚）
+service ChatService {  // ChatServer 节点间直连通道（NotifyTransport=grpc）
   rpc NotifyAddFriend(AddFriendReq) returns (AddFriendRsp);
   rpc ReplyFriend(ReplyFriendReq) returns (ReplyFriendRsp);         // 已定义，暂无调用
   rpc SendChatMsg(SendChatMsgReq) returns (SendChatMsgRsp);         // 已定义，暂无调用

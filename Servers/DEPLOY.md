@@ -181,7 +181,7 @@ redis-cli XINFO GROUPS chat:push:ChatServer1
 | 获取验证码失败 | 查 `verify_server.log`：QQ 邮箱授权码是否过期、SMTP 是否被限流；Redis `code_{email}` 是否已有值 |
 | GateServer 启动即退出 | 9090 端口占用，或 [GateServer/config.ini](GateServer/config.ini) 中 MySQL/Redis 配置不可达 |
 | ChatServer 停止慢 | 正常的优雅退出（清 Redis、停 I/O 池、关 gRPC），`stop.sh` 有 60 秒宽限，超时才 SIGKILL |
-| 跨服通知延迟或丢失 | 查 `redis-cli XINFO GROUPS chat:push:{节点名}` 的 `lag/pending`；确认 `NotifyTransport=stream` 且目标节点 consumer 已启动；紧急回滚可把相关节点切到 `grpc` |
+| 跨服通知延迟或丢失 | 查 `redis-cli XINFO GROUPS chat:push:{节点名}` 的 `lag/pending`；确认 `NotifyTransport=stream` 且目标节点 consumer 已启动；排查时可临时切到 `grpc` 直连 |
 | 事件持续重试 | `redis-cli XPENDING chat:push:{节点名}` 查看 idle/delivery；检查 `chat:dead:{节点名}` 与目标节点日志（payload 非法、处理异常） |
 | 配置加载失败 | 可执行文件与 `config.ini` 必须同目录（`build/<server>/`） |
 

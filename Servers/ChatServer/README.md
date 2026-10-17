@@ -2,7 +2,7 @@
 
 ## 简介
 
-分布式聊天系统的核心聊天节点：负责客户端 TCP 长连接、登录校验、好友关系维护，以及节点间的好友通知与消息转发。跨节点通知默认投递到 Redis Stream（每个节点一条事件流），由消费组异步落地；`ChatService` gRPC 保留为灰度与回滚通道。可部署多实例（`config.ini` / `config2.ini`），由 StatusServer 按 Redis 中的 `login_count` 做最小连接数分配。
+分布式聊天系统的核心聊天节点：负责客户端 TCP 长连接、登录校验、好友关系维护，以及节点间的好友通知与消息转发。跨节点通知默认投递到 Redis Stream（每个节点一条事件流），由消费组异步落地；`ChatService` gRPC 保留为显式直连通道。可部署多实例（`config.ini` / `config2.ini`），由 StatusServer 按 Redis 中的 `login_count` 做最小连接数分配。
 
 > 多节点通信的改造前后对比、完整架构与运维命令见 [../CLUSTER_COMMUNICATION.md](../CLUSTER_COMMUNICATION.md)。
 
@@ -28,7 +28,7 @@
 | ChatFlow | `chat_flow.*`：可单测的纯业务函数（搜人 / 资料加载 / 登录 / 加好友 / 认证 / 文本消息 / 跨节点通知 JSON） |
 | UserManager | 内存中 uid → shared_ptr\<CSession\> 映射，用 `common` 的 `SessionRegistry` 模板（互斥保护） |
 | ChatNotifier | 跨节点通知的统一落地逻辑：查本机会话并组装 JSON 推给客户端；gRPC 服务端与 Stream 消费者共用 |
-| ChatServiceImpl | gRPC 服务端（灰度/回滚通道）：接收其他节点直连通知，落地逻辑复用 `ChatNotifier` |
+| ChatServiceImpl | gRPC 服务端（显式直连通道）：接收其他节点直连通知，落地逻辑复用 `ChatNotifier` |
 | ChatGrpcClient | 按需动态发现对端：只读 Redis 节点注册表；每个对端一个 stub 池（每池 5 条），带 deadline。`NotifyTransport=grpc` 时用于显式直连 |
 | ChatEventBus | Stream 发布端：`XADD chat:push:{target}`，payload 为 protobuf 二进制，并维护流长度与 TTL |
 | ChatEventConsumer | Stream 消费端：consumer group 消费、ACK、pending 回收、幂等去重、过期丢弃与死信写入 |
@@ -251,7 +251,7 @@ RPCPort = 50081
 [Cluster]
 NodeTTLSeconds = 30
 HeartbeatSeconds = 10
-NotifyTransport = stream       # stream（默认）/ grpc（灰度或回滚）
+NotifyTransport = stream       # stream（默认）/ grpc（显式直连）
 StreamMaxLen = 100000          # 每条节点事件流的近似最大长度
 StreamKeyTtlSeconds = 86400    # 事件流与死信流的 TTL
 StreamBatchSize = 64
@@ -270,18 +270,18 @@ MaxPendingPerWorker = 4096
 
 启动时同时监听 TCP 与 gRPC；`start.sh` 分别以 `config.ini`、`config2.ini` 拉起两个实例。`NotifyTransport=stream` 时先建立本节点的 consumer group，再向 Redis 注册节点，避免其他节点开始投递时本节点还没准备好消费。
 
-启动后节点会把自身注册到 Redis：`SADD chat:nodes {Name}` + `SETEX chat:node:{Name} {json} 30`。其他节点不需要预配置对端：Stream 模式只依赖目标节点名（来自 `userver_{uid}`）写入对应的 `chat:push:{name}`；gRPC 回滚模式首次调用时按节点名查注册表并建立连接。节点异常退出后注册键 30 秒内自然过期。
+启动后节点会把自身注册到 Redis：`SADD chat:nodes {Name}` + `SETEX chat:node:{Name} {json} 30`。其他节点不需要预配置对端：Stream 模式只依赖目标节点名（来自 `userver_{uid}`）写入对应的 `chat:push:{name}`；gRPC 直连模式首次调用时按节点名查注册表并建立连接。节点异常退出后注册键 30 秒内自然过期。
 
 > 💡 **新增节点**：只需给新节点一份 `[SelfServer]` 配置并启动。其他节点无需改配置；StatusServer 会自动从 `chat:nodes` 发现它，不再需要静态 `[ChatServers]`。
 >
 > 多机部署时：`Host` 填 gRPC 监听地址（如 `0.0.0.0`），`RpcHost` 填其他节点可达的内网 IP，`PublicHost` 填客户端可达的公网 IP/域名。
 
-> 🔌 **需要 gRPC 直连时**：设置 `[Cluster] NotifyTransport = grpc`。`ChatGrpcClient` 仍会从 Redis 注册表读取目标节点的 `RpcHost:RPCPort`，不需要恢复 `[ChatServerN]` 静态配置；多网卡/NAT 场景只需把目标节点的 `RpcHost` 配成调用方可达地址。直连模式没有 Stream 的缓冲与重试，适合低延迟或 Stream 故障时的应急回滚。
+> 🔌 **需要 gRPC 直连时**：设置 `[Cluster] NotifyTransport = grpc`。`ChatGrpcClient` 仍会从 Redis 注册表读取目标节点的 `RpcHost:RPCPort`，不需要恢复 `[ChatServerN]` 静态配置；多网卡/NAT 场景只需把目标节点的 `RpcHost` 配成调用方可达地址。直连模式没有 Stream 的缓冲与重试，适合低延迟场景或 Stream 故障时的临时切换。
 
 ## 开发者注意
 
 - Handler 全跑在**同一逻辑线程**，禁止长时间阻塞；跨节点通知通过 `ChatMessageRouter` 投递到 `RpcDispatcher`，Stream 的 `XADD` 与 gRPC 调用都不在业务线程执行
-- gRPC 回滚模式设置 `[RPC] DeadlineMs`，单个对端卡住不会拖住业务队列；派发队列满时会丢弃通知并记录错误日志
+- gRPC 直连模式设置 `[RPC] DeadlineMs`，单个对端卡住不会拖住业务队列；派发队列满时会丢弃通知并记录错误日志
 - Stream 模式是**至少一次投递**：消费成功才 `XACK`，失败保留 pending 并由 `XCLAIM` 重试；超过 `StreamMaxDeliveryAttempts` 或 payload 非法时进入 `chat:dead:{node}`
 - 客户端回包仍是**本节点即时返回**：Stream 只保证事件异步送达目标节点，不代表目标客户端已收到；需要强同步结果的控制面请求继续走 gRPC
 - 同一发布节点到同一目标节点的顺序由固定 `RpcDispatcher` worker 保证；不同发布节点之间没有全局顺序，业务侧应按 `msg_id` 幂等

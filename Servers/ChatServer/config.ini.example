@@ -45,7 +45,7 @@ RPCPort = 50081
 # 节点注册表：chat:node:{Name} 的 TTL / 心跳间隔（秒）
 NodeTTLSeconds = 30
 HeartbeatSeconds = 10
-# 跨节点通知传输方式：stream=Redis Stream（默认），grpc=直连 gRPC（灰度/回滚）
+# 跨节点通知传输方式：stream=Redis Stream（默认），grpc=直连 gRPC
 NotifyTransport = stream
 # 每个节点事件流的最大长度（近似裁剪）与流 key TTL
 StreamMaxLen = 100000

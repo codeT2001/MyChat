@@ -6,19 +6,19 @@
 
 改造前的跨节点通信以“节点间直连 gRPC”为主：每个 ChatServer 需要知道其他节点的地址，通知在业务线程或派发线程里同步调用对端 `ChatService`。节点数量和配置项随实例数增长，可靠性与可观测性也依赖每个调用点的实现。
 
-本文把改造过程分为两个阶段：Phase 1 先解决静态配置、节点发现、超时和业务线程阻塞；Phase 2 再把跨节点通知的数据面切到 Redis Stream。下文“改动前”主要指最初形态，Phase 1 作为中间态单独说明。
+本文对比改造前与最终版本：改造前是静态对端 + 同步 gRPC，最终版本是 Redis 节点注册 + Redis Stream 数据面。升级方式为一次全量升级，不保留新旧版本混跑。
 
 本次改造把“跨节点通知”拆成两层：
 
 - **控制面**：节点注册发现、token 校验、状态查询等需要明确结果的请求继续使用 Redis 注册表 + gRPC。
-- **数据面**：好友通知、消息转发、踢下线等异步事件默认写入 Redis Stream，由目标节点消费并落地到本机客户端；gRPC 保留为灰度与回滚通道。
+- **数据面**：好友通知、消息转发、踢下线等异步事件默认写入 Redis Stream，由目标节点消费并落地到本机客户端；gRPC 保留为显式直连通道。
 
 目标如下：
 
 1. 新增 ChatServer 不再需要修改其他节点的对端配置。
 2. 节点间通知从同步调用改为异步投递，单个对端变慢或重启不拖住本节点业务线程。
 3. 提供至少一次投递、ACK、pending 回收、重试、去重与死信，降低“调用失败即永久丢失”的概率。
-4. 保留同步 gRPC 能力，控制面请求和故障回滚不被 Stream 改造绑死。
+4. 保留同步 gRPC 能力，控制面请求和需要直连的场景不被 Stream 改造绑死。
 
 ## 2. 改动前：静态对端 + 同步 gRPC
 
@@ -79,17 +79,11 @@ sequenceDiagram
 - **故障语义不清晰**：gRPC 返回成功只代表目标节点接收了请求，不代表目标用户在线，更不代表客户端已经收到。
 - **观测困难**：只能从调用方日志逐条排查，缺少“目标节点还有多少未处理事件”的聚合视角。
 
-### 2.3 Phase 1 中间态
+### 2.3 本次升级的边界
 
-Phase 1 已经完成以下改进，但仍保留 gRPC 数据面：
+最终版本采用一次性全量升级：所有 ChatServer 同时切换为新版本，不保留新旧版本混跑，也不再读取旧 `[PeerServer]` / `[ChatServerN]` / `[ChatServers]` 静态配置。
 
-- Redis 节点注册表 `chat:nodes` / `chat:node:{name}`，节点启动注册、退出注销、10 秒心跳续期。
-- `ChatGrpcClient` 从注册表解析对端地址；后续 `develop` 分支已移除旧 `[ChatServerN]` 静态配置兜底。
-- gRPC 调用统一设置 `[RPC] DeadlineMs`，避免无限等待。
-- `RpcDispatcher` 把同步 gRPC 从 LogicSystem 单业务线程移到固定 worker，同一目标节点固定同一 worker。
-- StatusServer 从注册表发现节点；`develop` 分支已移除 `[ChatServers]` / `[ChatServerN]` 静态节点表。
-
-Phase 1 解决的是“地址从哪来、调用在哪里执行、超时多久”，但没有解决“目标节点重启期间事件放哪、失败如何重试、如何观察积压”。Phase 2 用 Redis Stream 补上这部分。
+`NotifyTransport=grpc` 不是旧版本兼容路径，而是新版本提供的显式直连模式；它同样使用 Redis 注册表中的节点地址。
 
 ## 3. 改动后：控制面 gRPC + 数据面 Redis Stream
 
@@ -147,7 +141,7 @@ flowchart TB
     SB --> DEDUP
     SC --> DEDUP
 
-    SA -.->|gRPC ChatService<br/>NotifyTransport=grpc 回滚| SB
+    SA -.->|gRPC ChatService<br/>NotifyTransport=grpc 直连| SB
     SB -.->|gRPC ChatService| SC
 ```
 
@@ -155,8 +149,8 @@ flowchart TB
 
 - 事件流数量是 **N 条**，不是 N×N 条连接。每个 ChatServer 只拥有并消费自己的 `chat:push:{name}`。
 - 任意节点向目标节点发送事件时只需要目标节点名，不需要预先知道其 IP/端口。
-- `ChatService` gRPC 服务仍然保留，作为 `NotifyTransport=grpc` 的完整回滚路径。它的响应只表示目标节点接收了通知，不表示目标客户端已收到；token 校验、节点分配等需要明确结果的控制面请求仍走 `StatusService` / `VerifyService` 的 gRPC。
-- 节点注册表供 gRPC 回滚路径解析地址，也供 StatusServer 发现可分配节点。
+- `ChatService` gRPC 服务仍然保留，作为 `NotifyTransport=grpc` 的显式直连路径。它的响应只表示目标节点接收了通知，不表示目标客户端已收到；token 校验、节点分配等需要明确结果的控制面请求仍走 `StatusService` / `VerifyService` 的 gRPC。
+- 节点注册表供 gRPC 直连路径解析地址，也供 StatusServer 发现可分配节点。
 
 ### 3.2 组件职责
 
@@ -168,7 +162,7 @@ flowchart TB
 | `ChatEventConsumer` | `ChatServer/chat_event_consumer` | 建 consumer group、`XREADGROUP`、处理、`XACK`、回收 pending、写死信 |
 | `ChatNotifier` | `ChatServer/chat_notifier` | 查本机 `UserManager` 会话并组装 JSON 推送；Stream 与 gRPC 共用 |
 | `ChatServiceImpl` | `ChatServer/chat_service_impl` | gRPC 服务端，调用 `ChatNotifier` 落地通知 |
-| `ChatGrpcClient` | `ChatServer/chat_grpc_client` | gRPC 直连/回滚路径；只从 Redis 注册表解析对端地址 |
+| `ChatGrpcClient` | `ChatServer/chat_grpc_client` | gRPC 直连路径；只从 Redis 注册表解析对端地址 |
 | `RpcDispatcher` | `ChatServer/rpc_dispatcher` | 固定 key 落到固定 worker，异步执行 `XADD` 或 gRPC；避免阻塞 LogicSystem |
 
 ### 3.3 事件格式
@@ -280,7 +274,7 @@ sequenceDiagram
 - 目标节点名仍来自 `userver_{uid}`，地址来自 `chat:node:{name}`，不需要 `[ChatServerN]`。
 - 多网卡或 NAT 环境下，由目标节点配置 `[SelfServer] RpcHost` 为**调用方可达**的地址；`PublicHost` 只用于下发给客户端。
 - 外部业务服务也可以直接调用 ChatServer 的 `ChatService`，地址为 `RpcHost:RPCPort`；当前没有 gRPC 鉴权，只应部署在内网或可信网络。
-- 直连模式不经过 Stream 缓冲，目标节点重启期间的通知仍可能丢失；它适合低延迟场景或 Stream 故障时的应急回滚。
+- 直连模式不经过 Stream 缓冲，目标节点重启期间的通知仍可能丢失；它适合低延迟场景或 Stream 故障时的显式切换。
 
 ## 4. 改动前后对比
 
@@ -288,18 +282,18 @@ sequenceDiagram
 |---|---|---|
 | 节点配置 | 每个节点维护其他节点地址，O(N²) 条目 | 只配置自身信息；对端通过节点名与 Redis 发现 |
 | 拓扑 | 逻辑全连接，N×(N-1) 条调用关系 | N 条事件流，任意节点按目标名发布 |
-| 传输方式 | 同步 gRPC 请求-响应 | 异步 `XADD` / consumer group 消费；gRPC 可回滚 |
+| 传输方式 | 同步 gRPC 请求-响应 | 异步 `XADD` / consumer group 消费；gRPC 可显式直连 |
 | 业务线程 | 早期直接阻塞；后改为派发 worker | 只投递到派发队列，`XADD` 与 gRPC 都在 worker 执行 |
 | 客户端响应 | 本节点处理完即返回 | 不变，仍由本节点 Handler 立即返回 |
 | 投递可靠性 | 调用失败通常只记日志 | 至少一次：ACK、pending、reclaim、死信、去重 |
 | 目标节点重启 | 重启窗口内通知失败 | 事件保留在 Stream，恢复后继续消费（TTL 内） |
-| 超时控制 | 依赖 gRPC deadline | 主要靠 Stream TTL/积压治理；gRPC 回滚仍使用 `DeadlineMs` |
+| 超时控制 | 依赖 gRPC deadline | 主要靠 Stream TTL/积压治理；gRPC 直连仍使用 `DeadlineMs` |
 | 顺序 | 单连接调用顺序较直观 | 单源到单目标有序；跨源无全局顺序 |
 | 重复消息 | gRPC 通常不重试，重复少但可能丢 | 至少一次，可能重复，需要 `msg_id` 幂等 |
 | 运维观测 | 主要看调用方日志 | `XLEN` / `XINFO GROUPS` / `XPENDING` / 死信流 |
-| 外部依赖 | Redis（路由/注册）+ 对端 gRPC | Redis 成为跨节点通知的强依赖；gRPC 仅回滚 |
-| 扩缩容 | 新节点需要通知所有节点改配置（早期） | 新节点自行注册即可；旧节点无需改配置 |
-| 滚动升级 | gRPC 协议兼容即可 | 全量新版本；若必须混跑，统一切 `grpc` 且旧节点需能注册 Redis |
+| 外部依赖 | Redis（路由/注册）+ 对端 gRPC | Redis 成为跨节点通知的强依赖；gRPC 仅用于显式直连 |
+| 扩缩容 | 新节点需要通知所有节点改配置（早期） | 新节点自行注册即可；其他节点无需改配置 |
+| 升级方式 | 各节点可独立升级，依赖 gRPC 协议兼容 | 一次全量升级到新版本，不支持新旧版本混跑 |
 
 ## 5. 优缺点
 
@@ -311,18 +305,18 @@ sequenceDiagram
 4. **可靠性可运营**：pending、投递次数、死信、去重键都能通过 Redis 命令观察和处理。
 5. **复用现有基础设施**：项目已经依赖 Redis，不额外引入 Kafka/RabbitMQ 等中间件。
 6. **统一落地逻辑**：Stream 消费和 gRPC 服务端都调用 `ChatNotifier`，避免两条链路的 JSON 字段或错误码漂移。
-7. **灰度与回滚简单**：`NotifyTransport=stream|grpc` 单开关切换，不需要回滚代码。
+7. **直连模式切换简单**：`NotifyTransport=stream|grpc` 单开关切换，不需要恢复旧静态配置。
 
 ### 5.2 代价与风险
 
-1. **Redis 成为数据面强依赖**：Redis 不可用时 Stream 发布失败；虽然 gRPC 可回滚，但节点发现和路由本身也依赖 Redis。
+1. **Redis 成为数据面强依赖**：Redis 不可用时 Stream 发布失败；虽然可以切到 gRPC 直连，但节点发现和路由本身也依赖 Redis。
 2. **至少一次而非恰好一次**：重复投递需要业务幂等；去重键只覆盖 reclaim 重放，不能消除“处理成功但去重键未写入”的崩溃窗口。
 3. **发布失败没有本地 outbox**：当前 `Publish` 失败只记录错误日志，不进入本地重试队列；极端情况下仍可能丢事件。
 4. **无全局顺序**：跨源事件没有统一排序，不能依赖 Stream 实现全局因果一致。
 5. **离线/过期丢弃**：节点停机超过 TTL，或事件超过最大存活时间，会被裁剪或丢弃；这不是持久化消息队列。
 6. **单流热点**：单个目标节点的所有来源写入同一条 Stream，热点节点的事件量受 Redis 单 key 吞吐限制；当前规模可用，超大集群需要分片。
 7. **运维复杂度上升**：需要监控 lag、pending、死信和流长度；错误配置（如 TTL 过短）会静默丢消息。
-8. **升级约束**：新旧节点混跑时，旧节点不会消费 Stream；必须全量升级，或混跑期间统一切回 `grpc`。
+8. **升级约束**：必须一次全量升级，不支持新旧版本混跑；全量升级完成后所有节点都能消费各自的 Stream。
 
 ## 6. “同步响应”怎么理解
 
@@ -340,38 +334,45 @@ sequenceDiagram
 - 对需要明确结果的控制面调用（例如 token 校验、节点分配、未来的强一致业务），继续走 gRPC 请求-响应。
 - 如果未来确实需要“跨节点强同步”，可以在 gRPC 上增加业务 ACK，或实现 Stream 请求-响应（请求事件携带 reply stream/请求 ID，响应写回调用方流）。当前没有实现，文档不把 Stream 描述成同步 RPC 的替代品。
 
-## 7. 迁移、灰度与回滚
+## 7. 全量升级与直连模式
 
-### 7.1 配置开关
+### 7.1 配置
 
 ```ini
 [Cluster]
-NotifyTransport = stream   # 默认；改为 grpc 即回滚到直连 gRPC
+NotifyTransport = stream   # 默认；grpc 为显式直连模式
 ```
 
-`ChatMessageRouter` 在进程启动时读取该配置，修改后需要重启对应 ChatServer 生效。
+`ChatMessageRouter` 在进程启动时读取该配置，修改后需要重启 ChatServer 生效。
 
-### 7.2 推荐升级顺序
+### 7.2 全量升级步骤
 
-1. 先升级全部 ChatServer 到包含 `ChatEventConsumer` 的版本，但保持 `NotifyTransport=grpc`。
-2. 确认每个节点的 `chat:push:{name}` consumer group 已建立：`XINFO GROUPS chat:push:{name}`。
-3. 逐节点切换 `NotifyTransport=stream` 并重启，观察 `lag`、`pending` 与业务日志。
-4. 全部节点切换完成后，可删除旧的 `[ChatServerN]` 对端配置；StatusServer 也不再读取 `[ChatServers]` 静态节点表。
+1. 停止所有 ChatServer 与 StatusServer，确保升级期间没有旧版本节点继续提供服务。
+2. 部署新版本二进制和配置；每个 ChatServer 只需保留 `[SelfServer]`，删除旧的 `[PeerServer]` / `[ChatServerN]` 对端段。
+3. 按 `Redis → VerifyServer → GateServer → ChatServer 全部实例 → StatusServer` 的顺序启动。
+4. 确认每个 ChatServer 已注册并建立消费组：
 
-### 7.3 混合版本兼容
+```bash
+redis-cli SMEMBERS chat:nodes
+redis-cli XINFO GROUPS chat:push:ChatServer1
+```
 
-> `develop` 分支已移除静态对端配置。下面的兼容性仅针对仍会向 Redis 注册节点的 Phase 1 版本；最初版本（不注册 Redis、仅靠静态配置）不再支持与新节点混跑。
+5. 做一次跨节点好友申请 / 文本消息冒烟，确认目标节点日志出现 `ChatEventConsumer` 消费记录。
 
-- **旧节点 → 新节点**：旧节点只会发 gRPC，新节点仍保留 `ChatService`，兼容。
-- **新节点 → 旧节点（Stream 模式）**：旧节点没有 Stream 消费者，事件会留在 `chat:push:{旧节点}` 中直到过期，表现为“新节点发的跨服通知丢失”。
-- 因此混合版本期间不要让新节点以 Stream 模式向旧节点发布；应统一切回 `grpc`，或先完成全量升级再切 Stream。
+升级完成后所有节点都是新版本，不存在“新节点发给旧节点”的兼容问题。
 
-### 7.4 回滚步骤
+### 7.3 切换到 gRPC 直连
 
-1. 将所有 ChatServer 的 `NotifyTransport` 改为 `grpc` 并重启。
-2. 确认 gRPC 端口与节点注册信息可达；`ChatGrpcClient` 只使用注册表地址，不再读取静态对端配置。
-3. 保留 `chat:push:*` 与 `chat:dead:*` 一段时间用于排查，不要立即删除；确认无积压后再按运维策略清理。
-4. 如果回滚前已有未消费事件，切回 gRPC 不会自动补发这些事件；需要人工评估是否重放。
+如果某个节点需要低延迟直连，设置：
+
+```ini
+[Cluster]
+NotifyTransport = grpc
+```
+
+并重启该节点。地址仍从 `chat:node:{name}` 读取 `RpcHost:RPCPort`，不需要恢复任何静态对端配置。多网卡/NAT 场景由目标节点调整 `RpcHost`。
+
+直连模式不经过 Stream 的缓冲和重试；如果需要重新使用 Stream，把配置改回 `stream` 并重启即可。切换前未消费的 `chat:push:*` 事件不会自动通过 gRPC 补发，需要人工评估是否重放。
 
 ## 8. 运维与排障
 
@@ -402,7 +403,7 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 
 | 配置 | 默认值 | 作用 |
 |---|---|---|
-| `[Cluster] NotifyTransport` | `stream` | `stream` 使用 Redis Stream；`grpc` 回滚直连 |
+| `[Cluster] NotifyTransport` | `stream` | `stream` 使用 Redis Stream；`grpc` 使用显式直连 |
 | `NodeTTLSeconds` | 30 | 节点注册键 TTL |
 | `HeartbeatSeconds` | 10 | 节点注册心跳间隔 |
 | `StreamMaxLen` | 100000 | 单条事件流的近似最大长度 |
@@ -415,7 +416,7 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 | `StreamMaxEventAgeSeconds` | 300 | 事件最大存活时间，0 表示不限制 |
 | `DedupTtlSeconds` | 600 | 消费幂等键 TTL |
 | `[Redis] BlockingSocketTimeoutMs` | 5000 | 阻塞读专用连接的 socket 超时 |
-| `[RPC] DeadlineMs` | 500 | gRPC 回滚路径的超时 |
+| `[RPC] DeadlineMs` | 500 | gRPC 直连路径的超时 |
 | `[RPC] WorkerThreads` | 2 | 派发 worker 数 |
 | `[RPC] MaxPendingPerWorker` | 4096 | 每个 worker 的队列上限，满队列丢弃并记日志 |
 
@@ -427,7 +428,7 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 | `pending` 持续增长 | 处理逻辑抛异常、目标节点反复重启 | `XPENDING` 看 idle/delivery；异常修复后等待 reclaim，或人工评估重放 |
 | 死信增加 | payload 非法、未知事件类型、超过最大投递次数 | `XRANGE chat:dead:{node}` 查看 `reason`；修复版本后按需重放 |
 | Stream 不存在 | 节点从未发布过事件，或 TTL 已过期 | 正常现象；consumer 会在下次读取时按需重建 group |
-| 跨服通知全部丢失 | 混合版本中新节点用 Stream 发给旧节点 | 统一切回 `grpc` 或完成全量升级 |
+| 跨服通知全部丢失 | 节点未注册、`userver_{uid}` 指向错误节点，或误配了 `NotifyTransport` | 检查 `chat:nodes`、`chat:node:{name}` 与目标节点日志；必要时切 `grpc` 直连排查 |
 | 重启后短暂无通知 | 旧的 `userver_{uid}` 指向已下线节点 | 用户重新登录会覆盖路由；节点注册 TTL 最长 30 秒 |
 
 ## 9. 当前限制与后续可选演进
@@ -450,7 +451,7 @@ redis-cli XRANGE chat:push:ChatServer1 - + COUNT 5
 | `ChatServer/src/chat_event_consumer.{h,cpp}` | consumer group、消费、ACK、reclaim、死信、去重 |
 | `ChatServer/src/chat_notifier.{h,cpp}` | 本机会话查找与客户端 JSON 推送 |
 | `ChatServer/src/rpc_dispatcher.{h,cpp}` | 固定 key 的异步派发队列 |
-| `ChatServer/src/chat_grpc_client.{h,cpp}` | gRPC 回滚通道与节点地址解析 |
+| `ChatServer/src/chat_grpc_client.{h,cpp}` | gRPC 直连通道与节点地址解析 |
 | `ChatServer/src/chat_service_impl.{h,cpp}` | gRPC `ChatService` 服务端 |
 | `common/include/chat/node_registry.h`、`common/src/node_registry.cpp` | 节点注册、发现、TTL 心跳 |
 | `common/include/chat/node_info.h`、`common/src/node_info.cpp` | 节点信息编解码 |

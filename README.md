@@ -29,7 +29,7 @@
 | 两段式登录 | HTTP 换取 token → TCP 长连接校验 token | GateServer + StatusServer + ChatServer |
 | 最小连接数负载均衡 | 依据 Redis `login_count` 哈希选节点 | StatusServer |
 | 聊天节点水平扩展 | 多 ChatServer 实例，Redis 节点注册 + Stream 事件总线 | ChatServer + Redis |
-| 好友申请 / 认证 | 同服直推、跨服 Stream 异步投递（gRPC 可回滚） | ChatServer |
+| 好友申请 / 认证 | 同服直推、跨服 Stream 异步投递（gRPC 可直连） | ChatServer |
 | 实时文本消息 | 批量消息转发、已读状态 | ChatServer |
 | 在线会话管理 | 会话表 + Redis 路由/在线计数 | ChatServer + Redis |
 | 自动化回归测试 | 业务逻辑与 DB/Redis/gRPC 解耦，测试注入 fake；离线可跑 | `Servers/tests`、`Client/tests`（CTest）+ `Servers/VerifyServer/test`（Node） |
@@ -52,7 +52,7 @@ chat/
     │                           #     session_registry.h（uid→会话表模板，可单测）
     ├── GateServer/             #   HTTP 网关（Boost.Beast :9090）
     │                           #     src/http_params.*（URL/查询串解析）、src/gate_flow.*（纯业务函数）
-    ├── ChatServer/             #   TCP 聊天节点（可多实例，Stream 事件总线 + gRPC 回滚）
+    ├── ChatServer/             #   TCP 聊天节点（可多实例，Stream 事件总线 + gRPC 直连）
     │                           #     src/chat_flow.*（纯业务函数）、src/msg_codec.*（TCP 帧头）
     ├── StatusServer/           #   gRPC 协调服务（节点分配 / token 颁发与校验）
     │                           #     src/server_select.*、src/status_flow.*（纯函数）
@@ -116,7 +116,7 @@ graph TB
     Chat2 -- "XADD chat:push:ChatServer1" --> Redis
     Redis -- "XGROUP 异步投递" --> Chat1
     Redis -- "XGROUP 异步投递" --> Chat2
-    Chat1 -.->|"gRPC 回滚通道"| Chat2
+    Chat1 -.->|"gRPC 直连通道"| Chat2
     Chat1 -- "Redis 路由 / MySQL" --> Redis
     Chat1 --> MySQL
     Chat2 --> Redis
@@ -200,7 +200,7 @@ ChatServer 登录时直连 Redis 校验，**不删除**、靠 TTL 自然过期�
 | C++ 标准 | C++17 | 全项目 |
 | Qt | 6.2+（推荐 6.5+） | Widgets / Network / Gui |
 | Boost | 1.74+（含 Beast） | 服务端网络层 |
-| gRPC / Protobuf | 1.40+ / 3.12+ | 服务间 RPC / 跨服回滚通道 |
+| gRPC / Protobuf | 1.40+ / 3.12+ | 服务间 RPC / 跨服直连通道 |
 | MySQL Connector/C++ | 8.0 | mysqlcppconn |
 | hiredis / redis++ | — | Redis 客户端 |
 
