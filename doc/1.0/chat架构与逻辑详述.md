@@ -104,7 +104,7 @@ chat/
 
 | 组件 | 文件 | 职责与设计 |
 |------|------|-----------|
-| `mysql_dao` | `common/src/mysql_dao.cpp` | DAO + 连接池。固定大小阻塞队列、`wait_for(3s)` 超时、后台健康检查、全 PreparedStatement |
+| `mysql_dao` | `common/src/mysql_dao.cpp` | DAO + 连接池。固定大小队列、可配置 `AcquireTimeoutMs`、后台空闲巡检与自动补齐、全 PreparedStatement |
 | `redis_manager` | `common/src/redis_manager.cpp` | Redis 操作封装（string/hash/list），底层自带连接池 |
 | `rpc_stub_pool` | `common/include/chat/rpc_stub_pool.h` | gRPC stub 连接池模板，共享 channel + 多 stub |
 | `asio_io_context_pool` | `common/include/chat/asio_io_context_pool.h` | 线程池，固定 2 线程，round-robin 分配 |

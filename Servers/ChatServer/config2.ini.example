@@ -26,6 +26,7 @@ User = your_mysql_user
 Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
+AcquireTimeoutMs = 3000
 
 [SelfServer]
 Name = ChatServer2

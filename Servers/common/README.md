@@ -151,7 +151,9 @@ C++ 服务间及服务端与客户端共享的整数契约，完整表见 [../RE
 
 ### MySQL（mysql_dao + mysql_manager）
 
-- 内部类 `SqlConnPool`：`Acquire()` 取连接带 **3 秒超时**，池耗尽返回 nullptr（不永久阻塞）；后台健康检查线程周期性 `SELECT 1`（完整消费结果集），空闲连接按阈值 Reconnect
+- 内部类 `SqlConnPool`：`Acquire()` 带可配置超时（`[MySQL] AcquireTimeoutMs`，默认 3 秒），池耗尽返回 nullptr 不永久阻塞；后台线程每 5 秒巡检，只对空闲连接执行 `SELECT 1`（完整消费结果集），损坏则重连
+- 连接被 SQL 异常丢弃后，后台线程会把池补齐到 `PoolMaxSize`；启动时 MySQL 暂不可用也只记录告警，恢复后自动补连接，无需重启服务
+- 超时日志包含 `available / inUse / waiting / timeouts`，便于区分池过小与 MySQL 故障
 - DAO 异常 catch 分支对连接执行 `reset()` 丢弃，避免脏连接回池（如 error 2014）
 - 主要 DAO 方法：`RegUserTransaction`（事务内 `UPDATE user_id SET id=LAST_INSERT_ID(id+1)` 取号并插入 user）、`CheckEmail` / `UpdatePassword` / `CheckPassword`、`GetUserByUid` / `GetUserByName`、`AddFriendApply`（`ON DUPLICATE KEY UPDATE status=0`）、`AuthFriendApply`（双向 UPDATE）、`AddFriend`（事务内双向 INSERT IGNORE）、`GetApplyList` / `GetFriendList`（JOIN）
 - `MysqlManager` 是包装 `dao_` 的单例门面，业务层只接触管理器、不直接引用 `MysqlDao`

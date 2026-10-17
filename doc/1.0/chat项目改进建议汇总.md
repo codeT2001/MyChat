@@ -283,7 +283,7 @@
 
 - ✅ **公共静态库 + 瘦服务**：三 C++ 服务共享 `libchat_common.a`（`REFACTORING.md` 有完整权衡记录）。
 - ✅ **最小连接数负载均衡**：后台算好 + 请求读缓存 + 两阶段锁（共享锁读快照、独占锁写回），锁竞争极低。
-- ✅ **MySQL 连接池成熟处理**：`wait_for(3s)` 超时、空闲健康检查（`SELECT 1` 防 `Commands out of sync`）、事务兜底回滚、损坏连接丢弃、ID 发号技巧。
+- ✅ **MySQL 连接池成熟处理**：可配置获取超时、空闲健康检查（`SELECT 1` 防 `Commands out of sync`）、自动补齐掉线连接、事务兜底回滚、损坏连接丢弃、ID 发号技巧。
 - ✅ **会话顶替竞态处理**：`RmvUserSession` 做 session 身份比对。
 - ✅ **`Defer` 统一响应写回**：避免多分支漏写。
 - ✅ **DAO 全 PreparedStatement**：无 SQL 注入。

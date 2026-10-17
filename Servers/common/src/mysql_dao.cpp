@@ -1,17 +1,21 @@
 #include "chat/mysql_dao.h"
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cppconn/exception.h>
 #include <cppconn/prepared_statement.h>
 #include <cppconn/resultset.h>
 #include <cppconn/statement.h>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <mysql_connection.h>
 #include <mysql_driver.h>
 #include <queue>
 #include <thread>
+#include <vector>
 
 #include "chat/config_manager.h"
 #include "chat/constants.h"
@@ -20,10 +24,13 @@
 namespace P1 {
 namespace {
 constexpr uint64_t CONNECTION_IDLE_THRESHOLD = 600; // 10 minutes in seconds
+constexpr int HEALTH_CHECK_TICK_SECONDS = 5;
+constexpr size_t MAX_IDLE_CHECKS_PER_TICK = 2;
 const std::string DEFAULT_MYSQL_HOST = "127.0.0.1";
 const std::string DEFAULT_MYSQL_SCHEMA = "chat_db";
 const std::string DEFAULT_MYSQL_PORT = "3306";
 const uint32_t DEFAULT_MAX_POOLSIZE = 5;
+constexpr int32_t DEFAULT_ACQUIRE_TIMEOUT_MS = 3000;
 
 void LogSqlError(const char* where, const sql::SQLException& e)
 {
@@ -54,35 +61,55 @@ struct SqlConn {
 
 class MysqlDao::SqlConnPool {
 public:
+    struct Options {
+        uint32_t poolSize = DEFAULT_MAX_POOLSIZE;
+        std::chrono::milliseconds acquireTimeout {DEFAULT_ACQUIRE_TIMEOUT_MS};
+    };
+
     SqlConnPool(const std::string& url, const std::string& user, const std::string& pass, const std::string& schema,
-        uint32_t poolSize)
-        : url_(url), user_(user), pass_(pass), schema_(schema), poolSize_(poolSize), stop_(false), initFailed_(false)
+        const Options& options)
+        : stop_(false), url_(url), user_(user), pass_(pass), schema_(schema),
+          poolSize_(std::max<uint32_t>(options.poolSize, 1)),
+          acquireTimeout_(std::max(options.acquireTimeout, std::chrono::milliseconds(0)))
     {
-        try {
-            for (uint32_t i = 0; i < poolSize_; ++i) {
-                sql::mysql::MySQL_Driver* driver = sql::mysql::get_mysql_driver_instance();
-                std::unique_ptr<sql::Connection> rawConn(driver->connect(url_, user_, pass_));
-                rawConn->setSchema(schema_);
-
-                auto now = std::chrono::system_clock::now().time_since_epoch();
-                int64_t timestamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-
-                conns_.push(std::make_unique<SqlConn>(rawConn.release(), timestamp));
+        // 启动阶段允许部分成功：MySQL 暂时不可用时先启动服务，由后台线程持续补齐，
+        // 避免进程起来后连接池永远为空、每个请求都等满超时。
+        const int64_t now = NowSeconds();
+        uint32_t created = 0;
+        for (uint32_t i = 0; i < poolSize_; ++i) {
+            auto conn = CreateConn(now);
+            if (!conn) {
+                continue;
             }
+            conns_.push(std::move(conn));
+            ++created;
+        }
+        if (created == 0) {
+            LOG_ERROR("[MysqlDao] no MySQL connection created at startup, target:%s, will retry in background",
+                url_.c_str());
+        } else if (created < poolSize_) {
+            LOG_WARN("[MysqlDao] MySQL pool partially initialized, target:%s, connected:%u/%u",
+                url_.c_str(), created, poolSize_);
+        }
 
+        try {
             checkThread_ = std::thread([this]() {
                 while (!stop_) {
-                    BackgroundHealthCheck();
-                    // 分段睡眠以便及时响应 stop_，否则进程退出时 join 最坏要卡满 60 秒
-                    for (int i = 0; i < 60 && !stop_; ++i) {
+                    try {
+                        BackgroundHealthCheck();
+                    } catch (const std::exception& e) {
+                        LOG_ERROR("[MysqlDao] health check loop failed: %s", e.what());
+                    } catch (...) {
+                        LOG_ERROR("[MysqlDao] health check loop failed with unknown exception");
+                    }
+                    // 分段睡眠以便及时响应 stop_，同时让掉线连接能在数秒内补回
+                    for (int i = 0; i < HEALTH_CHECK_TICK_SECONDS && !stop_; ++i) {
                         std::this_thread::sleep_for(std::chrono::seconds(1));
                     }
                 }
             });
-
-        } catch (const sql::SQLException& e) {
-            LogSqlError("SqlConnPool init", e);
-            initFailed_ = true;
+        } catch (const std::exception& e) {
+            LOG_ERROR("[MysqlDao] start health check thread failed: %s", e.what());
         }
     }
 
@@ -94,49 +121,59 @@ public:
     std::unique_ptr<SqlConn> Acquire()
     {
         std::unique_lock<std::mutex> lock(mtx_);
-        // initFailed_ 时连接池永远为空，不能无限等待，否则业务线程全部挂死
-        // 带超时：正常情况下连接毫秒级归还会立即唤醒；
-        // 若连接因异常被全部丢弃（如 MySQL 宕机），超时后返回 nullptr 让上层快速失败
-        if (!cond_.wait_for(lock, std::chrono::seconds(3),
-                [this]() { return stop_ || initFailed_ || !conns_.empty(); })) {
-            LOG_ERROR("[MysqlDao] acquire connection timeout, pool exhausted");
-            return nullptr;
-        }
-        if (stop_ || conns_.empty()) {
+        ++waiting_;
+        // 正常情况下连接毫秒级归还会立即唤醒；若连接因异常被全部丢弃或 MySQL 宕机，
+        // 超时后返回 nullptr，由上层快速失败，后台线程继续补连接。
+        const bool ready = cond_.wait_for(lock, acquireTimeout_, [this]() {
+            return stop_ || !conns_.empty();
+        });
+        --waiting_;
+
+        if (!ready || stop_ || conns_.empty()) {
+            if (!stop_) {
+                ++timeouts_;
+                LOG_ERROR("[MysqlDao] acquire connection timeout, target:%s, available:%zu, inUse:%zu, waiting:%zu, timeouts:%llu, timeout:%lldms",
+                    url_.c_str(), conns_.size(), inUse_, waiting_,
+                    static_cast<unsigned long long>(timeouts_),
+                    static_cast<long long>(acquireTimeout_.count()));
+            }
             return nullptr;
         }
 
         auto conn = std::move(conns_.front());
         conns_.pop();
-        auto now = std::chrono::system_clock::now().time_since_epoch();
-        conn->lastUsedTime_ = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+        ++inUse_;
+        conn->lastUsedTime_ = NowSeconds();
 
         return conn;
     }
 
     void Release(std::unique_ptr<SqlConn> conn)
     {
-        if (!conn)
-            return;
-
         // 兜底：归还前确保连接处于干净状态
         //   1) 若还有未提交事务，回滚
         //   2) 恢复 autocommit
-        // 任何一步失败说明连接已不可用，直接丢弃（unique_ptr 析构会 delete conn）
-        if (conn->conn_) {
+        // 任何一步失败说明连接已不可用，直接丢弃（unique_ptr 析构会 delete conn）。
+        // 传入 nullptr 表示调用方在异常分支主动丢弃了连接，仍要归还 inUse 名额。
+        bool reusable = false;
+        if (conn && conn->conn_) {
             try {
                 if (!conn->conn_->getAutoCommit()) {
                     try { conn->conn_->rollback(); } catch (...) {}
                     conn->conn_->setAutoCommit(true);
                 }
+                reusable = true;
             } catch (...) {
                 LOG_WARN("[MysqlDao] Release: connection is broken, dropping it");
-                return;
             }
         }
 
         std::lock_guard<std::mutex> lock(mtx_);
-        if (!stop_) {
+        if (inUse_ > 0) {
+            --inUse_;
+        }
+        if (reusable && !stop_) {
+            conn->lastUsedTime_ = NowSeconds();
             conns_.push(std::move(conn));
             cond_.notify_one();
         }
@@ -144,100 +181,149 @@ public:
 
     void Close()
     {
-        stop_ = true;
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            cond_.notify_all();
+        if (stop_.exchange(true)) {
+            return;
         }
+        cond_.notify_all();
         if (checkThread_.joinable()) {
             checkThread_.join();
         }
         std::queue<std::unique_ptr<SqlConn>> empty;
+        std::lock_guard<std::mutex> lock(mtx_);
         std::swap(conns_, empty);
     }
 
 private:
-    void BackgroundHealthCheck()
+    static int64_t NowSeconds()
     {
-        std::vector<std::unique_ptr<SqlConn>> connsToCheck;
-
-        {
-            std::lock_guard<std::mutex> lock(mtx_);
-            while (!conns_.empty()) {
-                connsToCheck.push_back(std::move(conns_.front()));
-                conns_.pop();
-            }
-        }
-
-        auto now = std::chrono::system_clock::now().time_since_epoch();
-        int64_t currentTs = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-
-        for (auto& c : connsToCheck) {
-            bool valid = true;
-            if (currentTs - c->lastUsedTime_ >= static_cast<int64_t>(CONNECTION_IDLE_THRESHOLD)) {
-                try {
-                    // 必须用 executeQuery 并完整消费结果集；
-                    // 用 execute() 又不 getResultSet() 会留下未读结果，
-                    // 连接归还后下一条命令报 2014 Commands out of sync
-                    std::unique_ptr<sql::Statement> stmt(c->conn_->createStatement());
-                    std::unique_ptr<sql::ResultSet> pingRes(stmt->executeQuery("SELECT 1"));
-                    pingRes->next();
-                    pingRes->close();
-                    c->lastUsedTime_ = currentTs;
-                } catch (const sql::SQLException& e) {
-                    LogSqlError("HealthCheck", e);
-                    valid = false;
-                    if (!Reconnect(currentTs)) {
-                        LOG_ERROR("[MysqlDao] reconnect broken connection failed, pool size may decrease");
-                    }
-                }
-            }
-
-            if (valid) {
-                std::lock_guard<std::mutex> lock(mtx_);
-                if (!stop_ && conns_.size() < poolSize_) {
-                    conns_.push(std::move(c));
-                }
-            }
-        }
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        return std::chrono::duration_cast<std::chrono::seconds>(now).count();
     }
 
-    bool Reconnect(int64_t timestamp)
+    std::unique_ptr<SqlConn> CreateConn(int64_t timestamp)
     {
         try {
             sql::mysql::MySQL_Driver* driver = sql::mysql::get_mysql_driver_instance();
             // 立即用 unique_ptr 接管，setSchema 抛异常时也能保证 conn 被释放
             std::unique_ptr<sql::Connection> rawConn(driver->connect(url_, user_, pass_));
             rawConn->setSchema(schema_);
+            return std::make_unique<SqlConn>(rawConn.release(), timestamp);
+        } catch (const sql::SQLException& e) {
+            LogSqlError("CreateConn", e);
+            return nullptr;
+        } catch (const std::exception& e) {
+            LOG_ERROR("[MysqlDao] create connection failed: %s", e.what());
+            return nullptr;
+        }
+    }
 
-            auto newConn = std::make_unique<SqlConn>(rawConn.release(), timestamp);
-            {
-                std::lock_guard<std::mutex> lock(mtx_);
-                if (!stop_ && conns_.size() < poolSize_) {
-                    conns_.push(std::move(newConn));
-                } else {
-                    // newConn 析构会自动释放 conn，不能再手动 delete，否则 double free
-                    return false;
-                }
-            }
-            LOG_INFO("[MysqlDao] connection reconnected successfully");
+    bool IsHealthy(SqlConn& conn)
+    {
+        try {
+            // 必须用 executeQuery 并完整消费结果集；
+            // 用 execute() 又不 getResultSet() 会留下未读结果，
+            // 连接归还后下一条命令报 2014 Commands out of sync
+            std::unique_ptr<sql::Statement> stmt(conn.conn_->createStatement());
+            std::unique_ptr<sql::ResultSet> pingRes(stmt->executeQuery("SELECT 1"));
+            pingRes->next();
+            pingRes->close();
             return true;
         } catch (const sql::SQLException& e) {
-            LogSqlError("Reconnect", e);
+            LogSqlError("HealthCheck", e);
+            return false;
+        } catch (const std::exception& e) {
+            LOG_ERROR("[MysqlDao] health check failed: %s", e.what());
             return false;
         }
     }
 
-    std::mutex mtx_;
+    void BackgroundHealthCheck()
+    {
+        const int64_t currentTs = NowSeconds();
+        std::vector<std::unique_ptr<SqlConn>> idleConns;
+
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            // 每轮最多挑少量空闲连接做健康检查，避免巡检期间把整个池搬空、业务请求无连接可用
+            const size_t count = conns_.size();
+            for (size_t i = 0; i < count; ++i) {
+                auto conn = std::move(conns_.front());
+                conns_.pop();
+                if (idleConns.size() < MAX_IDLE_CHECKS_PER_TICK &&
+                    currentTs - conn->lastUsedTime_ >= static_cast<int64_t>(CONNECTION_IDLE_THRESHOLD)) {
+                    idleConns.push_back(std::move(conn));
+                } else {
+                    conns_.push(std::move(conn));
+                }
+            }
+        }
+
+        for (auto& conn : idleConns) {
+            if (IsHealthy(*conn)) {
+                conn->lastUsedTime_ = currentTs;
+            } else {
+                LOG_WARN("[MysqlDao] idle connection is broken, reconnecting, target:%s", url_.c_str());
+                conn = CreateConn(currentTs);
+            }
+            if (!conn) {
+                continue;
+            }
+            std::lock_guard<std::mutex> lock(mtx_);
+            if (!stop_ && conns_.size() + inUse_ < poolSize_) {
+                conns_.push(std::move(conn));
+                cond_.notify_one();
+            }
+        }
+
+        Replenish();
+    }
+
+    void Replenish()
+    {
+        // 连接可能因 SQL 异常被 DAO 主动丢弃，靠这里把池补回目标大小；
+        // MySQL 恢复后无需重启服务即可自愈。
+        for (;;) {
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                if (stop_ || conns_.size() + inUse_ >= poolSize_) {
+                    return;
+                }
+            }
+
+            auto conn = CreateConn(NowSeconds());
+            if (!conn) {
+                return; // MySQL 仍不可用，下个巡检周期再试
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+                if (stop_) {
+                    return;
+                }
+                if (conns_.size() + inUse_ >= poolSize_) {
+                    return;
+                }
+                conns_.push(std::move(conn));
+                cond_.notify_one();
+            }
+            LOG_INFO("[MysqlDao] connection replenished, target:%s, available:%zu, inUse:%zu, pool size:%u",
+                url_.c_str(), conns_.size(), inUse_, poolSize_);
+        }
+    }
+
+    mutable std::mutex mtx_;
     std::condition_variable cond_;
     std::queue<std::unique_ptr<SqlConn>> conns_;
     std::atomic<bool> stop_;
-    bool initFailed_;
     std::string url_;
     std::string user_;
     std::string pass_;
     std::string schema_;
     uint32_t poolSize_;
+    std::chrono::milliseconds acquireTimeout_;
+    size_t inUse_ = 0;
+    size_t waiting_ = 0;
+    uint64_t timeouts_ = 0;
     std::thread checkThread_;
 };
 
@@ -251,11 +337,16 @@ MysqlDao::MysqlDao()
     auto pwd = cfg.GetValue<std::string>(sectionName, "Pwd");
     auto schema = cfg.GetValue<std::string>(sectionName, "Schema", DEFAULT_MYSQL_SCHEMA);
     auto poolMaxSize = cfg.GetValue<uint32_t>(sectionName, "PoolMaxSize", DEFAULT_MAX_POOLSIZE);
+    auto acquireTimeoutMs = cfg.GetValue<int32_t>(sectionName, "AcquireTimeoutMs", DEFAULT_ACQUIRE_TIMEOUT_MS);
     if (user.empty() || pwd.empty()) {
         LOG_ERROR("[MysqlDao] create SqlConnPool failed, MySQL User or Pwd not configured");
         abort();
     }
-    pool_ = std::make_unique<SqlConnPool>(host + ":" + port, user, pwd, schema, poolMaxSize);
+
+    SqlConnPool::Options options;
+    options.poolSize = poolMaxSize;
+    options.acquireTimeout = std::chrono::milliseconds(std::max(acquireTimeoutMs, 1));
+    pool_ = std::make_unique<SqlConnPool>(host + ":" + port, user, pwd, schema, options);
 }
 
 MysqlDao::~MysqlDao() {}

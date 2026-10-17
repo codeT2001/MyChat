@@ -25,6 +25,8 @@ User = your_mysql_user
 Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
+# 池耗尽时获取连接的最长等待时间（毫秒），超时快速失败
+AcquireTimeoutMs = 3000
 
 [RPC]
 # 调用 StatusServer / VerifyServer 的超时与 stub 池参数

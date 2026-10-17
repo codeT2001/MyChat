@@ -18,6 +18,7 @@ User = your_mysql_user
 Pwd = your_mysql_password
 Schema = chat_db
 PoolMaxSize = 5
+AcquireTimeoutMs = 3000
 
 [RPC]
 # 调用 VerifyServer 的超时与 stub 池参数
