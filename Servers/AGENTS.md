@@ -56,7 +56,7 @@ cd VerifyServer && npm install && npm test   # node --test "test/*.test.js"
 ```
 
 测试只编译被测的「纯逻辑」源文件（如 `password_crypto` / `msg_node` / `config_manager` / 协议常量），
-不依赖 DB/Redis/gRPC，可离线快速运行（当前 11 个测试、99 个用例）。新增用例：在 `tests/` 加 `test_*.cpp`
+不依赖 DB/Redis/gRPC，可离线快速运行（当前 11 个测试、103 个用例）。新增用例：在 `tests/` 加 `test_*.cpp`
 （用 `TESTFW_TEST` 定义用例、`CHECK` / `CHECK_EQ` 断言），并在 `tests/CMakeLists.txt`
 用 `chat_add_test(<name> <sources...>)` 注册；用例若需外部依赖，在其目标上自行 `find_package` / `target_link_libraries`。
 

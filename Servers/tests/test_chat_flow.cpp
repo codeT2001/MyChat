@@ -518,6 +518,50 @@ TESTFW_TEST(TextChatMsg_handles_missing_or_bad_text_array)
     CHECK_EQ(plan.response["to_uid"].asInt(), 2001);
 }
 
+// —— 跨节点通知（其他 ChatServer 经 gRPC 转发到本节点） ——
+TESTFW_TEST(PeerAddFriendNotify_carries_applicant_profile)
+{
+    const Json::Value notify = P1::BuildPeerAddFriendNotify(1001, "bob", "hi", "icon_b", 1, "nick_b");
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(notify["apply_uid"].asInt(), 1001);
+    CHECK_EQ(notify["name"].asString(), std::string("bob"));
+    CHECK_EQ(notify["desc"].asString(), std::string("hi"));
+    CHECK_EQ(notify["icon"].asString(), std::string("icon_b"));
+    CHECK_EQ(notify["sex"].asInt(), 1);
+    CHECK_EQ(notify["nick"].asString(), std::string("nick_b"));
+}
+
+TESTFW_TEST(ResolvePeerAuthAction_treats_legacy_zero_as_accept)
+{
+    CHECK_EQ(P1::ResolvePeerAuthAction(0), P1::FRIEND_ACTION_ACCEPT);   // 旧消息不带 action
+    CHECK_EQ(P1::ResolvePeerAuthAction(1), P1::FRIEND_ACTION_ACCEPT);
+    CHECK_EQ(P1::ResolvePeerAuthAction(2), P1::FRIEND_ACTION_REJECT);
+    CHECK_EQ(P1::ResolvePeerAuthAction(99), P1::FRIEND_ACTION_ACCEPT); // 未知值按同意兼容
+}
+
+TESTFW_TEST(PeerTextChatNotify_packs_messages)
+{
+    const std::vector<std::pair<std::string, std::string>> msgs {
+        { "m1", "hello" }, { "m2", "world" }
+    };
+    const Json::Value notify = P1::BuildPeerTextChatNotify(1001, 2001, msgs);
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(notify["from_uid"].asInt(), 1001);
+    CHECK_EQ(notify["to_uid"].asInt(), 2001);
+    CHECK_EQ(notify["text_array"].size(), 2u);
+    CHECK_EQ(notify["text_array"][0]["msg_id"].asString(), std::string("m1"));
+    CHECK_EQ(notify["text_array"][0]["content"].asString(), std::string("hello"));
+    CHECK_EQ(notify["text_array"][1]["msg_id"].asString(), std::string("m2"));
+    CHECK_EQ(notify["text_array"][1]["content"].asString(), std::string("world"));
+}
+
+TESTFW_TEST(PeerTextChatNotify_empty_list_keeps_old_shape)
+{
+    const Json::Value notify = P1::BuildPeerTextChatNotify(1001, 2001, {});
+    CHECK_EQ(notify["error"].asInt(), Ec(ErrorCodes::SUCCESS));
+    CHECK_EQ(notify["text_array"].size(), 0u);   // 与旧实现一致：无消息时为空（客户端按 size() 读）
+}
+
 // —— 用户基础资料：Redis 缓存 + MySQL 回填 ——
 TESTFW_TEST(LoadBaseUserInfo_hits_redis_without_touching_mysql)
 {

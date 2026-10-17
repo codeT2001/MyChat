@@ -2,6 +2,9 @@
 #define _P1_CHAT_SERVICE_IMPL_H
 
 #include <grpcpp/grpcpp.h>
+
+#include "chat/service_interfaces.h"
+#include "chat_flow.h"
 #include "message.grpc.pb.h"
 namespace P1 {
 using grpc::Server;
@@ -36,6 +39,8 @@ public:
     Status NotifyKickUser(ServerContext* context, const KickUserReq* request, KickUserRsp* reply) override;
     bool GetBaseInfo(const std::string& baseKey, int32_t uid, std::shared_ptr<UserInfo>& userInfo);
 private:
+    // 资料读取（Redis 缓存 + MySQL 回填）走 chat_flow，与其他 handler 同一实现
+    ChatDependencies deps_;
 
 };
 

@@ -333,6 +333,46 @@ TextChatPlan ProcessTextChatMsg(const Json::Value& req)
     return plan;
 }
 
+Json::Value BuildPeerAddFriendNotify(int32_t applyUid, const std::string& name,
+    const std::string& desc, const std::string& icon, int32_t sex, const std::string& nick)
+{
+    Json::Value val;
+    val["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    val["apply_uid"] = applyUid;
+    val["name"] = name;
+    val["desc"] = desc;
+    val["icon"] = icon;
+    val["sex"] = sex;
+    val["nick"] = nick;
+    return val;
+}
+
+int32_t ResolvePeerAuthAction(int32_t rawAction)
+{
+    // 旧消息不带 action（默认 0）时按同意兼容
+    return (rawAction == FRIEND_ACTION_REJECT) ? FRIEND_ACTION_REJECT : FRIEND_ACTION_ACCEPT;
+}
+
+Json::Value BuildPeerTextChatNotify(int32_t fromUid, int32_t toUid,
+    const std::vector<std::pair<std::string, std::string>>& msgs)
+{
+    Json::Value rtvalue;
+    rtvalue["error"] = static_cast<int32_t>(ErrorCodes::SUCCESS);
+    rtvalue["from_uid"] = fromUid;
+    rtvalue["to_uid"] = toUid;
+
+    // 与旧实现一致：无消息时 text_array 为 null（客户端按 size() 读取，行为不变）
+    Json::Value textArray;
+    for (const auto& [msgId, content] : msgs) {
+        Json::Value e;
+        e["content"] = content;
+        e["msg_id"] = msgId;
+        textArray.append(e);
+    }
+    rtvalue["text_array"] = textArray;
+    return rtvalue;
+}
+
 void AppendApplyList(Json::Value& dst, const std::vector<std::shared_ptr<ApplyInfo>>& list)
 {
     for (const auto& apply : list) {

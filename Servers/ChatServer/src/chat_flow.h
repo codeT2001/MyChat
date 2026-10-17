@@ -82,6 +82,19 @@ struct TextChatPlan {
 };
 TextChatPlan ProcessTextChatMsg(const Json::Value& req);
 
+// —— 跨节点（其他 ChatServer 通过 gRPC 发来）通知的 JSON 组装 ——
+
+// 其他节点转发来的加好友申请 → 发给本节点的目标用户（带申请人资料）
+Json::Value BuildPeerAddFriendNotify(int32_t applyUid, const std::string& name,
+    const std::string& desc, const std::string& icon, int32_t sex, const std::string& nick);
+
+// 跨节点认证消息里的 action：2=拒绝，其余（含旧消息默认 0）按同意兼容
+int32_t ResolvePeerAuthAction(int32_t rawAction);
+
+// 其他节点转发来的文本消息 → 发给本节点的接收者
+Json::Value BuildPeerTextChatNotify(int32_t fromUid, int32_t toUid,
+    const std::vector<std::pair<std::string, std::string>>& msgs);
+
 // 登录响应里的申请 / 好友列表序列化（纯函数，供 HandleLogin 复用）
 void AppendApplyList(Json::Value& dst, const std::vector<std::shared_ptr<ApplyInfo>>& list);
 void AppendFriendList(Json::Value& dst, const std::vector<std::shared_ptr<UserInfo>>& list);
