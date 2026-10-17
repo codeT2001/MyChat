@@ -1,10 +1,10 @@
 const grpc = require('@grpc/grpc-js')
 const messageProto = require('./proto')
 const constantsModule = require('./constants')
-const { v4: uuidv4 } = require('uuid')
 const emailModule = require('./email')
 const configModule = require('./config');
 const redisModule = require('./redis')
+const verifyCodeModule = require('./verify-code')
 
 async function GracefulShutdown() {
     console.log('\n[EXIT] closing email pool...')
@@ -23,24 +23,17 @@ async function GetVerifyCode(call, callback) {
         const queryRes = await redisModule.GetRedis(constantsModule.code_prefix + call.request.email);
         let uniqueId = queryRes;
         if (queryRes === null) {
-            uniqueId = uuidv4();
-            if (uniqueId.length > 4) {
-                uniqueId = uniqueId.substring(0, 4);
-            }
-            const bres = await redisModule.SetRedisExpire(constantsModule.code_prefix + call.request.email, uniqueId, 600)
+            uniqueId = verifyCodeModule.GenerateVerifyCode();
+            const bres = await redisModule.SetRedisExpire(constantsModule.code_prefix + call.request.email, uniqueId,
+                verifyCodeModule.CODE_TTL_SECONDS)
             if (!bres) {
                 callback(null, { email: call.request.email, error: constantsModule.Errors.VERIFY_REDIS_ERROR })
                 return;
             }
-            const expireAt = new Date(Date.now() + 10 * 60 * 1000)
-            const timeStr = expireAt.toLocaleString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false,
-                timeZone: 'Asia/Shanghai'
-            })
+            const expireAt = Date.now() + verifyCodeModule.CODE_EXPIRE_MS
+            const timeStr = verifyCodeModule.FormatExpireTime(expireAt)
 
-            const text_str = `您的验证码是 ${uniqueId}，请在 ${timeStr} 前完成注册。`
+            const text_str = verifyCodeModule.BuildMailText(uniqueId, timeStr)
 
             const mailOptions = {
                 from: configModule.email_user,

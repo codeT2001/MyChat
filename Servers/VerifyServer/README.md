@@ -21,6 +21,8 @@
 | 文件 | 说明 |
 |---|---|
 | [server.js](../VerifyServer/server.js) | gRPC 服务入口，实现 `GetVerifyCode`，注册 SIGINT/SIGTERM 优雅关闭 |
+| [verify-code.js](../VerifyServer/verify-code.js) | 验证码纯逻辑：生成 / 有效期常量 / 截止时间格式化 / 邮件文案（可单测） |
+| [test/](../VerifyServer/test) | `node --test` 单测：验证码逻辑、错误码跨语言契约、配置模板自检 |
 | [email.js](../VerifyServer/email.js) | nodemailer 单连接封装：发信、超时重建、指数退避重试 |
 | [redis.js](../VerifyServer/redis.js) | ioredis 客户端：`GetRedis` / `SetRedisExpire` |
 | [proto.js](../VerifyServer/proto.js) | 用 proto-loader 加载本目录 `message.proto` |
@@ -126,6 +128,21 @@ node server.js     # 直接运行；生产环境由上层 start.sh 以 nohup 拉
 ```
 
 手动验证 SMTP 配置：`node test-smtp.js`。
+
+### 单元测试
+
+```bash
+cd <repo>/Servers/VerifyServer
+npm install          # 首次（测试只用到 node 内置 test runner，跑测试本身不需要联网）
+npm test             # = node --test "test/*.test.js"
+```
+
+用例覆盖：验证码为 4 位十六进制且随机性基本可用、Redis TTL(600s) 与邮件截止时间(10min) 一致、
+截止时间固定按 Asia/Shanghai 显示为 HH:MM（含跨日）、邮件文案包含验证码与时间、
+**错误码与 C++ `constants.h` 逐项同值**、`config.json.example` 字段齐全。
+
+> 注意：`node --test`（不带参数）会把根目录的 `test-smtp.js` 也当成用例执行，它是需要真实 SMTP 的手动脚本，
+> 故 `npm test` 显式指定 `test/*.test.js`。
 
 ## 安全提示
 

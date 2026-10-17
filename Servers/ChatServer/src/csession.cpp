@@ -1,45 +1,15 @@
 #include "csession.h"
 
-#include <arpa/inet.h>
+#include <cstring>
+
 #include <boost/asio/write.hpp>
 
 #include "chat/log.h"
 #include "logic_system.h"
+#include "msg_codec.h"
 namespace P1 {
 namespace {
-constexpr uint32_t HEAD_TOTAL_LENGTH = 6;
-constexpr uint32_t HEAD_ID_LENGTH = 2;
-constexpr uint32_t HEAD_DATA_LENGTH = 4;
 constexpr uint32_t MAX_SENDQUEUE_SIZE = 2000;
-
-// 帧头布局：msgId(2B) + body 长度(4B)；改动任一常量都会在此处编译期报错
-static_assert(HEAD_ID_LENGTH + HEAD_DATA_LENGTH == HEAD_TOTAL_LENGTH, "TCP frame header layout mismatch");
-
-inline void WriteUint16Net(void* dest, uint16_t value)
-{
-    uint16_t net_val = htons(value);
-    memcpy(dest, &net_val, sizeof(net_val));
-}
-
-inline uint16_t ReadUint16Net(const void* src)
-{
-    uint16_t val = 0;
-    memcpy(&val, src, sizeof(val));
-    return ntohs(val);
-}
-
-inline void WriteUint32Net(void* dest, uint32_t value)
-{
-    uint32_t net_val = htonl(value);
-    memcpy(dest, &net_val, sizeof(net_val));
-}
-
-inline uint32_t ReadUint32Net(const void* src)
-{
-    uint32_t val = 0;
-    memcpy(&val, src, sizeof(val));
-    return ntohl(val);
-}
 } // namespace
 
 CSession::CSession(std::shared_ptr<boost::asio::io_context> ioc, uint32_t id)
@@ -55,7 +25,7 @@ void CSession::InitSocketOptions()
         LOG_ERROR("[Session] set TCP_NODELAY failed, sessionId:%u, error:%s", sessionId_, ec_opt.message().c_str());
     }
 
-    msgHeadNode_ = std::make_shared<MsgNode>(HEAD_TOTAL_LENGTH);
+    msgHeadNode_ = std::make_shared<MsgNode>(MSG_HEAD_TOTAL_LENGTH);
 }
 
 ip::tcp::socket& CSession::GetSocket()
@@ -69,7 +39,7 @@ void CSession::Start()
         return;
     }
     msgHeadNode_->SetCurLen(0);
-    boost::asio::async_read(socket_, boost::asio::buffer(msgHeadNode_->GetData(), HEAD_TOTAL_LENGTH),
+    boost::asio::async_read(socket_, boost::asio::buffer(msgHeadNode_->GetData(), MSG_HEAD_TOTAL_LENGTH),
         [self = shared_from_this()](const boost::system::error_code& ec, std::size_t bytes_transferred) {
             self->ReadMessageHead(ec, bytes_transferred);
         });
@@ -85,7 +55,7 @@ void CSession::ReadMessageHead(const boost::system::error_code& ec, std::size_t 
         return;
     }
 
-    if (ec || readLength != HEAD_TOTAL_LENGTH) {
+    if (ec || readLength != MSG_HEAD_TOTAL_LENGTH) {
         if (!ec) {
             LOG_ERROR("[Session] read head length mismatch, sessionId:%u, readLen:%zu", sessionId_, readLength);
         } else if (ec != boost::asio::error::operation_aborted) {
@@ -95,10 +65,11 @@ void CSession::ReadMessageHead(const boost::system::error_code& ec, std::size_t 
         return;
     }
 
-    msgHeadNode_->SetCurLen(HEAD_TOTAL_LENGTH);
-    uint16_t msgId = ReadUint16Net(msgHeadNode_->GetData());
-    uint32_t bodySize = ReadUint32Net(msgHeadNode_->GetData() + HEAD_ID_LENGTH);
-    if (bodySize > MAX_MSG_LENGTH) {
+    msgHeadNode_->SetCurLen(MSG_HEAD_TOTAL_LENGTH);
+    uint16_t msgId = 0;
+    uint32_t bodySize = 0;
+    DecodeMsgHead(msgHeadNode_->GetData(), msgId, bodySize);
+    if (!IsValidMsgBodySize(bodySize)) {
         LOG_ERROR("[Session] invalid body size, sessionId:%u, msgId:%u, bodySize:%u", sessionId_, msgId, bodySize);
         Close();
         return;
@@ -171,15 +142,14 @@ void CSession::SendMessage(const char* data, size_t len, uint16_t msgId)
         return;
     }
 
-    auto msgNode = std::make_shared<MsgNode>(len + HEAD_TOTAL_LENGTH, msgId);
+    auto msgNode = std::make_shared<MsgNode>(len + MSG_HEAD_TOTAL_LENGTH, msgId);
 
-    WriteUint16Net(msgNode->GetData(), msgId);
-    WriteUint32Net(msgNode->GetData() + HEAD_ID_LENGTH, static_cast<uint32_t>(len));
+    EncodeMsgHead(msgNode->GetData(), msgId, static_cast<uint32_t>(len));
 
     if (len > 0 && data != nullptr) {
-        memcpy(msgNode->GetData() + HEAD_TOTAL_LENGTH, data, len);
+        memcpy(msgNode->GetData() + MSG_HEAD_TOTAL_LENGTH, data, len);
     }
-    msgNode->SetCurLen(len + HEAD_TOTAL_LENGTH);
+    msgNode->SetCurLen(len + MSG_HEAD_TOTAL_LENGTH);
     LOG_DEBUG("[Session] send, sessionId:%u, msgId:%u, len:%u", sessionId_, msgId, msgNode->GetCurLen());
     bool needStartWrite = false;
     {

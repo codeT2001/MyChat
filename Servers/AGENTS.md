@@ -49,6 +49,12 @@ cmake --build build -j1
 ctest --test-dir build --output-on-failure
 ```
 
+Node.js 侧（VerifyServer）用内置 test runner，无需额外框架：
+
+```bash
+cd VerifyServer && npm install && npm test   # node --test "test/*.test.js"
+```
+
 测试只编译被测的「纯逻辑」源文件（如 `password_crypto` / `msg_node` / `config_manager` / 协议常量），
 不依赖 DB/Redis/gRPC，可离线快速运行（当前 8 个测试、77 个用例）。新增用例：在 `tests/` 加 `test_*.cpp`
 （用 `TESTFW_TEST` 定义用例、`CHECK` / `CHECK_EQ` 断言），并在 `tests/CMakeLists.txt`
@@ -63,6 +69,8 @@ ctest --test-dir build --output-on-failure
 - `ChatServer/src/chat_flow.{h,cpp}`（见 `tests/test_chat_flow.cpp`）
 - `StatusServer/src/server_select.{h,cpp}`（见 `tests/test_server_select.cpp`）
 - `StatusServer/src/status_flow.{h,cpp}`（见 `tests/test_status_flow.cpp`）
+- `ChatServer/src/msg_codec.{h,cpp}`（TCP 帧头编解码，见 `tests/test_msg_codec.cpp`；与客户端
+  `Client/src/tcpmanager.cpp` 的 QDataStream 大端布局对齐，改帧头长度常量会触发编译期断言）
 
 新增业务逻辑优先写成「纯函数 + 接口依赖」放进上述文件，Handler 只做解析与回包，便于直接补单测。
 

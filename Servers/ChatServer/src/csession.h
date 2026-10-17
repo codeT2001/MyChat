@@ -6,9 +6,9 @@
 #include <mutex>
 #include <queue>
 
+#include "msg_codec.h"
 #include "msg_node.h"
 namespace P1 {
-constexpr uint32_t MAX_MSG_LENGTH = 1024 * 2;
 using namespace boost::asio;
 class CSession : public std::enable_shared_from_this<CSession> {
 public:

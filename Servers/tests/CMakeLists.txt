@@ -80,3 +80,9 @@ chat_add_test(test_status_flow
 target_include_directories(test_status_flow PRIVATE
     ${REPO_SERVER_DIR}/common/include
     ${REPO_SERVER_DIR}/StatusServer/src)
+
+# TCP 帧头编解码（ChatServer，无外部依赖）
+chat_add_test(test_msg_codec
+    ${TEST_SRC_DIR}/test_msg_codec.cpp
+    ${REPO_SERVER_DIR}/ChatServer/src/msg_codec.cpp)
+target_include_directories(test_msg_codec PRIVATE ${REPO_SERVER_DIR}/ChatServer/src)
