@@ -1,2 +1,150 @@
-# 编辑器 / IDE 本地配置
+# ==============================================================================
+# 仓库统一 .gitignore（只保留这一份，Servers/ 与 Client/ 不再单独维护）
+#
+# 语义提醒：
+#   * 不含 "/" 的模式在**任意层级**匹配（如 *.o 同时覆盖 Servers/ 与 Client/ 下的产物）
+#   * 含 "/" 的模式相对本文件（仓库根）解析（如 build/ 匹配任意层级的 build 目录）
+#   * 真实配置含凭据，一律不入库；仓库只保留 *.example 模板
+# ==============================================================================
+
+# ===== IDE / 编辑器 =====
 .vscode/
+.idea/
+idea/
+*.swp
+*.swo
+.*.swp
+*~
+.#*
+*.*#
+*.autosave
+*.orig
+*.rej
+*.flc
+.DS_Store
+.directory
+Thumbs.db
+tags
+
+# ===== 编译产物：目标文件 / 静态库 / 动态库 / 可执行文件 =====
+*.d
+*.o
+*.obj
+*.lo
+*.slo
+*.gch
+*.pch
+*.a
+*.la
+*.lai
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.app
+*.out
+*.debug
+*.mod
+*.smod
+*.core
+
+# ===== 编译产物：Visual Studio / MinGW =====
+*.pdb
+*.idb
+*.ilk
+*.ib_pdb_index
+*.ncb
+*.sdf
+*.opensdf
+*.suo
+*.sln
+*.vcxproj
+*vcxproj.*
+*.vcproj
+*vcproj.*.*.user
+*.Debug
+*.Release
+
+# ===== CMake 与构建目录 =====
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+CMakeLists.txt.user*
+Makefile*
+build/
+build-*/
+out/
+_deps/
+cmake-build-*/
+
+# ===== Qt 客户端生成物 =====
+*.moc
+.moc/
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+*_pch.h.cpp
+*_resource.rc
+*.qm
+*.prl
+*.res
+*.rc
+.qmake.cache
+.qmake.stash
+*.pro.user*
+*.qbs.user*
+.obj/
+.pch/
+.rcc/
+.uic/
+
+# ===== Node.js（VerifyServer）=====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+*.tsbuildinfo
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+.vercel/
+.now/
+.netlify/
+dist/
+
+# ===== 运行期产物 / 日志 / 临时文件 =====
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+*.temp
+
+# ===== 真实配置与凭据（仓库只保留 *.example 模板）=====
+config.ini
+config2.ini
+config.json
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+*.p12
+
+# ===== 测试与覆盖率 =====
+coverage/
+.nyc_output/
+test-results/
+junit.xml
+
+# ===== 其他 =====
+*.pyc
+core
+!core/

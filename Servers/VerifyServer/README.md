@@ -148,7 +148,7 @@ npm test             # = node --test "test/*.test.js"
 
 | 问题 | 说明 | 建议 |
 |---|---|---|
-| 明文凭据 | `config.json` 存放 QQ 邮箱授权码与 Redis 地址 | 立即轮换授权码；改用环境变量注入；`config.json` 加入 `.gitignore` |
+| 明文凭据 | `config.json` 存放 QQ 邮箱授权码与 Redis 地址（仓库根 `.gitignore` 已忽略该文件，只保留 `config.json.example`） | 立即轮换授权码；改用环境变量注入 |
 | 无并发限制 | 同一邮箱 10 分钟防重，但可换邮箱刷 | 加 IP 维度限流 |
 | 验证码为 uuid 前 4 位 | 非密码学安全随机，且仅 4 位（可暴力枚举 1 万次） | 改用 `crypto.randomInt`，并限制单邮箱错误尝试次数 |
 

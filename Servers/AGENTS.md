@@ -94,6 +94,8 @@ cd VerifyServer && npm install && npm test   # node --test "test/*.test.js"
 - **Redis 键无 TTL**：`utoken_{uid}` / `userver_{uid}` 在进程异常退出时会残留，靠下次登录顶号流程覆盖自愈。
 - 顶号模式：重复登录不拒绝，由 ChatServer 踢掉旧会话（同节点 `NOTIFY_KICK`，跨节点 `ChatService.NotifyKickUser`）。
 - 真实配置（`config.ini`、`config2.ini`、`config.json`、`.env`）已被 `.gitignore` 忽略，仓库只保留 `*.example`；**不要提交真实凭据**。
+- `.gitignore` **只在仓库根保留一份**（`MyChat/.gitignore`，不再有 `Servers/.gitignore` / `Client/.gitignore`）：
+  新增忽略规则请追加到根文件，并注意「不含 `/` 的模式在任意层级匹配」——别误伤 `Client/` 的源码与资源。
 - 固定端口：9090 / 50051 / 50052 / 50061 / 50062 / 50081 / 50082 / 6379 / 3306。
 
 ## 文档索引
