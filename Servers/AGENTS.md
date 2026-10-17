@@ -54,12 +54,18 @@ ctest --test-dir build --output-on-failure
 （用 `TESTFW_TEST` 定义用例、`CHECK` / `CHECK_EQ` 断言），并在 `tests/CMakeLists.txt`
 用 `chat_add_test(<name> <sources...>)` 注册；用例若需外部依赖，在其目标上自行 `find_package` / `target_link_libraries`。
 
+业务逻辑与基础设施解耦：接口在 `common/include/chat/service_interfaces.h`
+（`IUserStore` / `IKeyValueStore` / `IVerifyCodeService` / `IChatServerRouter`），`MysqlManager` /
+`RedisManagerPool` 直接实现对应接口；`GateServer/src/gate_flow.{h,cpp}` 承载只依赖接口的纯业务函数，
+测试用 fake 注入（见 `tests/test_gate_flow.cpp`）。
+
 ## 代码约定
 
 - 公共库符号统一在命名空间 `P1`；头文件以 `#include "chat/xxx.h"` 引用。
 - 业务服务只需 `target_link_libraries(<server> PRIVATE chat_common)`，外部依赖由 `common` 以 `PUBLIC` 传递。
 - 日志统一用 `LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR`（`common/include/chat/log.h`）；**禁止 `std::cout`/`std::cerr`/`printf`**；含 token/密码的请求禁止打印整个 body。
 - HTTP / TCP Handler 回包统一用 `Defer` 兜底；新增错误分支直接 `return`，不要漏发响应。
+- 新增业务逻辑优先写成只依赖 `chat/service_interfaces.h` 的纯函数（便于单测），HTTP/TCP 层只做解析与回包的薄壳；参考 `GateServer/src/gate_flow.{h,cpp}`。
 - 错误码统一使用 `common/include/chat/constants.h` 的 `ErrorCodes`；Node.js `VerifyServer` 已收敛进同一张表，其特有码占用 `20001+` 预留段（见 `VerifyServer/README.md`）。
 - `proto` 唯一源文件是 `common/proto/message.proto`；生成物在 `build/common/grpc_gen/`，**不入库、勿手改**。
 

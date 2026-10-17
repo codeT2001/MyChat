@@ -2,20 +2,21 @@
 #define _P1_MYSQL_MANAGER_H_
 #include "chat/mysql_dao.h"
 #include "chat/noncopyable.h"
+#include "chat/service_interfaces.h"
 namespace P1 {
 struct ApplyInfo;
 struct UserInfo;
-class MysqlManager {
+class MysqlManager : public IUserStore {
 public:
     static MysqlManager& GetInstance() { static MysqlManager instance; return instance; }
     DISALLOW_COPY_MOVE(MysqlManager);
 
     ~MysqlManager() = default;
 
-    int RegisterUser(const std::string& name, const std::string& email, const std::string& pwd, const std::string& icon);
-    bool CheckEmail(const std::string& name, const std::string & email);
-    bool UpdatePassword(const std::string& email, const std::string& pwd);
-    bool CheckPassword(const std::string& name, const std::string& pwd, UserInfo& userInfo);
+    int RegisterUser(const std::string& name, const std::string& email, const std::string& pwd, const std::string& icon) override;
+    bool CheckEmail(const std::string& name, const std::string & email) override;
+    bool UpdatePassword(const std::string& email, const std::string& pwd) override;
+    bool CheckPassword(const std::string& name, const std::string& pwd, UserInfo& userInfo) override;
     std::shared_ptr<UserInfo> GetUserByUid(uint32_t uid);
     std::shared_ptr<UserInfo> GetUserByName(const std::string& name);
     bool AddFriendApply(const int from, const int to);

@@ -106,6 +106,8 @@ chat/
 │   │   ├── mysql_manager.h        #   - MySQL 管理器
 │   │   ├── rpc_stub_pool.h        #   - gRPC stub 连接池模板
 │   │   ├── asio_io_context_pool.h #   - Asio I/O 线程池
+│   │   ├── password_crypto.h      #   - 口令摘要 SHA-256(固定盐) + 恒定时间比较
+│   │   ├── service_interfaces.h   #   - 基础设施接口层（IUserStore/IKeyValueStore/IVerifyCodeService/IChatServerRouter）
 │   │   ├── status_grpc_client.h   #   - StatusServer gRPC 客户端
 │   │   └── verify_grpc_client.h   #   - VerifyServer gRPC 客户端
 │   ├── src/                       # 公共实现

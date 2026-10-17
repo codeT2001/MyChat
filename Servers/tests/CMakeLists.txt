@@ -15,6 +15,7 @@ set(REPO_SERVER_DIR ${CMAKE_SOURCE_DIR})
 find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(Threads REQUIRED)
+find_library(JSONCPP_LIB NAMES jsoncpp libjsoncpp)
 
 # 组装一个测试可执行文件（test_main.cpp 提供 main）并注册到 CTest
 function(chat_add_test name)
@@ -47,3 +48,12 @@ chat_add_test(test_config_manager
     ${REPO_SERVER_DIR}/common/src/config_manager.cpp)
 target_include_directories(test_config_manager PRIVATE ${REPO_SERVER_DIR}/common/include)
 target_link_libraries(test_config_manager PRIVATE Boost::filesystem Threads::Threads)
+
+# GateServer 业务逻辑（纯函数 + 接口依赖；测试注入 fake，不碰 DB/Redis/gRPC）
+chat_add_test(test_gate_flow
+    ${TEST_SRC_DIR}/test_gate_flow.cpp
+    ${REPO_SERVER_DIR}/GateServer/src/gate_flow.cpp)
+target_include_directories(test_gate_flow PRIVATE
+    ${REPO_SERVER_DIR}/common/include
+    ${REPO_SERVER_DIR}/GateServer/src)
+target_link_libraries(test_gate_flow PRIVATE ${JSONCPP_LIB})
