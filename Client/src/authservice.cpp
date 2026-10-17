@@ -25,6 +25,18 @@ QString ErrorCodeToMessage(ErrorCodes err)
             return QObject::tr("验证码不存在或已过期");
         case ErrorCodes::USER_EXIST:
             return QObject::tr("用户名或邮箱已被注册");
+        case ErrorCodes::EMAIL_NOT_MATCH:
+            return QObject::tr("姓名与邮箱不匹配");
+        case ErrorCodes::UPDATE_PASSWORD_FAILED:
+            return QObject::tr("密码修改失败，请稍后重试");
+        case ErrorCodes::PASSWORD_NOT_MATCH:
+            return QObject::tr("用户名或密码错误");
+        case ErrorCodes::UID_INVALID:
+            return QObject::tr("用户不存在或已失效");
+        case ErrorCodes::TOKEN_INVALID:
+            return QObject::tr("登录凭证已失效，请重新登录");
+        case ErrorCodes::USER_ALREADY_LOGIN:
+            return QObject::tr("账号已在其他设备登录");
         case ErrorCodes::ERR_NETWORK:
             return QObject::tr("网络异常，请检查网络连接");
         case ErrorCodes::JSON_PARSE_ERROR:

@@ -10,9 +10,9 @@
 #include <cstring>
 
 namespace {
-// GateServer 默认地址。可用环境变量 CHAT_SERVER_HOST / CHAT_SERVER_PORT 覆盖，
-// 本地调试无需改源码重编译（见 Client/AGENTS.md「安全与配置提示」）。
-constexpr char DEFAULT_SERVER_HOST[] = "81.69.247.52";
+// GateServer 默认地址（本地）。可用环境变量 CHAT_SERVER_HOST / CHAT_SERVER_PORT 覆盖，
+// 联调/部署无需改源码重编译（见 Client/AGENTS.md「安全与配置提示」）。
+constexpr char DEFAULT_SERVER_HOST[] = "127.0.0.1";
 constexpr int DEFAULT_SERVER_PORT = 9090;
 } // namespace
 QMap<TipType, QString> Utils::tipStack_;
@@ -164,18 +164,40 @@ bool Utils::CheckVerifyCodeValid(const QString &str, QLabel *label, int32_t leng
 
 QString Utils::GetServerUrl(const QString &path)
 {
-    static const QString host = qEnvironmentVariable("CHAT_SERVER_HOST", DEFAULT_SERVER_HOST);
-    static const int port = []() {
-        bool ok = false;
-        const int v = qEnvironmentVariableIntValue("CHAT_SERVER_PORT", &ok);
-        return (ok && v > 0) ? v : DEFAULT_SERVER_PORT;
-    }();
+    // 不缓存：进程内改环境变量（含测试）即时生效，也避免静态初始化带来的隐式耦合
+    const QString host = qEnvironmentVariable("CHAT_SERVER_HOST", DEFAULT_SERVER_HOST);
+    bool portOk = false;
+    const int envPort = qEnvironmentVariableIntValue("CHAT_SERVER_PORT", &portOk);
+    const int port = (portOk && envPort > 0) ? envPort : DEFAULT_SERVER_PORT;
     return QString("http://%1:%2%3").arg(host).arg(port).arg(path);
 }
 
 void Utils::ClearTips()
 {
     tipStack_.clear();
+}
+
+QString Utils::FormatFileSize(qint64 size)
+{
+    constexpr qint64 kKB = 1024;
+    constexpr qint64 kMB = 1024LL * 1024;
+    constexpr qint64 kGB = 1024LL * 1024 * 1024;
+
+    double num = 0.0;
+    const char *unit = "B";
+    if (size < kKB) {
+        num = static_cast<double>(size);
+    } else if (size < kMB) {
+        num = static_cast<double>(size) / kKB;
+        unit = "KB";
+    } else if (size < kGB) {
+        num = static_cast<double>(size) / kMB;
+        unit = "MB";
+    } else {
+        num = static_cast<double>(size) / kGB;
+        unit = "GB";
+    }
+    return QString::number(num, 'f', 2) + ' ' + QLatin1String(unit);
 }
 
 namespace {

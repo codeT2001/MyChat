@@ -18,11 +18,12 @@ ChatClient 是基于 Qt 6 / C++17 的即时通讯桌面客户端，采用「界�
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
+ctest --test-dir build --output-on-failure
 ```
 
 - Qt 不在 `PATH` 中时追加 `-DCMAKE_PREFIX_PATH=/path/to/Qt/6.x/gcc_64`。
 - 运行：Windows 用 `build\ChatClient.exe`，Linux / macOS 用 `./build/ChatClient`。
-- 运行前须把 `src/utils.cpp` 中的 `SERVER_HOST` / `SERVER_PORT` 改成可达的 GateServer 地址，本地调试用 `127.0.0.1`。
+- GateServer 地址默认 `127.0.0.1:9090`，用环境变量 `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT` 覆盖，不要改源码提交环境地址。
 - GUI 无控制台，日志落在可执行文件旁的 `logs/chatclient-<PID>.log`，排查问题以该文件为准。
 
 ## 编码风格与命名规范
@@ -35,7 +36,15 @@ cmake --build build -j
 
 ## 测试指南
 
-仓库目前没有单元测试与 CI，改动通过「构建 + 手工回归」验证：编译成功后运行客户端，依次覆盖登录、注册、找回密码、搜索加好友、收发消息，并确认日志中没有 `LOG_ERROR`。提交前至少保证一次干净的全量构建通过。
+客户端已有 CTest + Qt Test 单元测试（`tests/`，默认随构建启用，`-DBUILD_TESTING=OFF` 关闭）：
+
+- 只测纯逻辑（JSON/帧编解码、工具函数、`UserManager`、跨项目协议契约、`rc.qrc` 资源登记），不建网络与界面；
+- 新增/重命名被测的纯逻辑源文件时，同步维护 `tests/CMakeLists.txt`；
+- 失败详情看 `build/tests/reports/<测试名>.txt`（部分终端抓不到 Qt Test stdout）；
+- 协议常量、消息号、`HttpPaths` 改动会先被 `test_protocol_contract` 拦住——客户端与服务端必须同值；
+- UI / 网络链路仍靠手工回归：登录、注册、找回密码、搜索加好友、收发消息，并确认日志中没有 `LOG_ERROR`。
+
+提交前至少保证一次干净的全量构建 + `ctest` 全绿。
 
 ## 提交与 Pull Request 规范
 
@@ -46,5 +55,5 @@ cmake --build build -j
 
 ## 安全与配置提示
 
-- 服务器地址目前硬编码在 `src/utils.cpp`，不要提交真实生产地址或凭据。
+- 服务器地址默认值在 `src/utils.cpp`（`127.0.0.1:9090`），运行期用 `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT` 覆盖；不要提交真实生产地址或凭据。
 - 不要在客户端持久化密码；登录 token 只保存在内存中的 `UserManager`，退出即失效。

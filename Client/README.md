@@ -18,7 +18,8 @@
 - [七、数据模型（domainmodels.h）](#七数据模型domainmodelsh)
 - [八、模块清单](#八模块清单)
 - [九、构建与运行](#九构建与运行)
-- [十、已知问题与不一致](#十已知问题与不一致)
+- [十、单元测试](#十单元测试)
+- [十一、已知问题与不一致](#十一已知问题与不一致)
 
 ---
 
@@ -32,6 +33,7 @@
 | HTTP | `QNetworkAccessManager`（异步，信号槽回调） |
 | TCP | `QTcpSocket` + `QDataStream`（自定义二进制帧，大端） |
 | JSON | `QJsonDocument` / `QJsonObject` |
+| 测试 | CTest + Qt Test（`Qt6::Test`，只编译纯逻辑源文件，离线可跑） |
 | 设计模式 | Meyers 单例、信号槽、业务编排（Service）、setup-method |
 
 ---
@@ -89,6 +91,7 @@ graph TB
 ```
 Client/
 ├── CMakeLists.txt          # Qt 构建（GLOB 自动纳入 src/inc/ui，新增文件无需改 CMake）
+├── tests/                  # CTest + Qt Test 单元测试（独立目标，默认随构建启用）
 ├── rc.qrc                  # 资源文件（style/images 内嵌）
 ├── README.md
 ├── src/                    # 全部实现（.cpp）
@@ -146,7 +149,7 @@ sequenceDiagram
 
 - **第一段 HTTP**：GateServer 校验账号密码 → 查 `userver_{uid}` 防重复 → StatusServer 分配节点并由其写 `utoken_{uid}`
 - **第二段 TCP**：ChatServer 通过 gRPC 让 StatusServer 校验 token，通过后回传完整资料
-- token 为**一次性消费**（校验后即删），避免重放
+- token 写入 Redis 时带 600 秒 TTL，**有效期内可重放**（校验链路不删除 token；一次性消费的 `StatusService.Login` 尚未接入链路）
 - `AuthService` 把链路收敛成 `SigLoginSuccess / SigLoginFailed / SigLoginError`，UI 不直接接触任何 Manager
 
 ### 4.2 获取验证码 + 注册
@@ -342,7 +345,7 @@ sequenceDiagram
 
 - 消息号取值见 `RequestId`（`inc/constants.h`）：业务消息 `10001~10016`，心跳 `CHAT_HEARTBEAT=99999`
 - body 为 JSON 文本；心跳包 body 为空
-- ⚠️ **服务端单帧 body 硬上限为 2048 字节**（服务端 `MAX_MSG_LENGTH = 1024 * 2`）。客户端侧的上限更宽松（10 MB），发送超长消息会被服务端直接断连，客户端需自行控制单批大小
+- ⚠️ **服务端单帧 body 硬上限为 2048 字节**（服务端 `MAX_MSG_LENGTH = 1024 * 2`）。客户端接收侧保险上限是 10 MB，但**发送侧必须自行分批**：文本按 UTF-8 字节 + JSON 包装开销累计，单批 1024 字节（`inc/constants.h` 的 `TextMsgLimits`），超限帧会被服务端直接断连
 
 ### 粘包 / 半包处理
 
@@ -353,8 +356,8 @@ sequenceDiagram
 
 | 限制 | 值 | 超限行为 |
 |---|---|---|
-| 接收缓冲区 | 1 MB（`MAX_RECV_BUFFER_SIZE`） | `socket_.abort()` 断开 |
-| 单条消息体 | 10 MB（`MAX_MSG_BODY_SIZE`） | `socket_.abort()` 断开 |
+| 接收缓冲区 | 1 MB（`MsgCodec::MAX_RECV_BUFFER`） | `socket_.abort()` 断开 |
+| 单条消息体 | 10 MB（`MsgCodec::MAX_RECV_BODY`） | `socket_.abort()` 断开 |
 
 ### 心跳与断线重连
 
@@ -426,7 +429,7 @@ graph BT
 - 好友的备注名（`name_`）与标签（`label_`）目前只在本地编辑，服务端同步协议未接入
 - `MsgInfo{msgFlag:"text/image/file", content, pixmap}` 是输入区待发消息的载体
 
-> ⚠️ **`UserManager` 存在未初始化成员**：`inc/usermanager.h` 中的部分成员变量声明后未赋初值，读取前务必确认已由登录流程写入，否则可能读到脏值。
+> 说明：`UserManager` 的成员均有默认初始化（`token_` 空串、`userInfo_` 空指针、申请/好友表为空），未登录时 `GetUid()` 返回 `-1`、名称类接口返回 `"undefined"`，不会读到脏值。
 
 ---
 
@@ -443,6 +446,7 @@ graph BT
 | `chatservice.*` | 文本消息收发与通知处理 |
 | `httpmanager.*` | HTTP 传输单例，按 RequestId 抛出 SigHttpFinish，不感知业务 |
 | `tcpmanager.*` | TCP 单例，封包/拆包、心跳、重连 |
+| `msgcodec.*` | TCP 帧编解码（6 字节大端帧头）与帧长上限常量，供 `TcpManager` 与测试共用 |
 | `usermanager.*` | 用户/申请/好友/消息数据单例 |
 | `jsoncodec.*` | JSON 解析与序列化（JsonParser/JsonSerializer） |
 | `domainmodels.*` | 数据模型实现 |
@@ -523,36 +527,65 @@ cmake --build build -j$(nproc)
 | Linux / macOS | `./build/ChatClient` |
 | Windows | `build\Debug\ChatClient.exe` |
 
-> ⚠️ **运行前必须改服务器地址。** 服务器 host/port 硬编码在 `src/utils.cpp`：
+> GateServer 地址默认是本机回环，运行时可用环境变量覆盖（无需改源码重编译）：
 
-```cpp
-constexpr char SERVER_HOST[] = "81.69.247.52";   // 改成你的 GateServer 地址
-constexpr int  SERVER_PORT = 9090;
+```bash
+export CHAT_SERVER_HOST=127.0.0.1   # 默认值，联调时改成实际 GateServer 地址
+export CHAT_SERVER_PORT=9090        # 默认 9090
 ```
 
-本地调试请改为 `127.0.0.1`。**建议后续将其改为读取配置文件或环境变量**，避免每次换环境都要重新编译。
+Windows PowerShell 用 `$env:CHAT_SERVER_HOST = "127.0.0.1"`。地址每次请求时读取，进程内改环境变量即时生效；
+默认值定义在 `src/utils.cpp` 的 `DEFAULT_SERVER_HOST` / `DEFAULT_SERVER_PORT`，仓库里不提交生产地址。
 
 ### 与后端联调前的检查清单
 
 1. `Servers/*` 已全部拉起（`./start.sh` 后 `./status.sh` 全绿）
-2. 客户端 `SERVER_HOST` 与服务端 GateServer 地址一致
+2. 客户端 `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT`（或默认值）与服务端 GateServer 地址一致
 3. 防火墙放行 9090（HTTP）以及 50061/50062（TCP 聊天）
 4. 若走公网，`Servers/StatusServer/config.ini` 里的 ChatServer 地址必须是客户端可达的地址（不能是 `127.0.0.1`）
 
 ---
 
-## 十、已知问题与不一致
+## 十、单元测试
+
+测试只编译被测的纯逻辑源文件（JSON 编解码、帧编解码、工具函数、`UserManager`），
+不建网络连接、不实例化界面、不需要服务端与数据库，可在无显示器的环境离线运行。
+
+```bash
+cd Client
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
+
+- 默认开启；`-DBUILD_TESTING=OFF` 可只构建客户端。
+- 每个测试同时写一份文本日志到 `build/tests/reports/<测试名>.txt`（部分终端抓不到 Qt Test 的 stdout，
+  失败时看这份日志里的 `Actual` / `Expected` 与失败行号）。
+- 用例清单见 `tests/CMakeLists.txt`；被测的纯逻辑文件新增/改名时同步修改该文件。
+
+| 测试 | 覆盖 |
+|---|---|
+| `test_protocol_contract`（6 用例） | 客户端 `RequestId` / `ErrorCodes` / `AcceptAction` 与 `Servers/common/include/chat/constants.h` 逐项同值；本地码落在 5000+ 预留段且不与服务端码撞值；`HttpPaths` 与 GateServer 注册路由一致；服务端 `AVATAR_COUNT` 对应的头像文件齐全 |
+| `test_msgcodec`（8 用例） | 帧头长度常量（2/4/6）与编译期布局断言；**大端逐字节断言**（msgId/4 字节长度）；编解码往返；0/0xFFFF 边界；接收上限边界；帧头/上限与服务端 `msg_codec.h` 同值；文本批次 + JSON 包装不超过服务端单帧上限 |
+| `test_jsoncodec`（11 用例） | `ExtractError` 缺字段语义；搜索/加好友/认证通知/聊天通知解析；action 缺省与旧协议 0 值的兼容（按同意）；拒绝不带对方资料；空 `text_array`；申请/好友列表字段；登录 HTTP 回包；各请求序列化字段 |
+| `test_utils`（8 用例） | 邮箱/密码/用户名校验边界；默认 `127.0.0.1:9090` 与 `CHAT_SERVER_HOST/PORT` 覆盖、非法端口回退；`icon` → qrc 头像路径映射与非法值回退；文件大小格式化 B/KB/MB/GB 边界（含 1MB 档位回归） |
+| `test_usermanager`（9 用例） | 登录前空状态；资料/token；申请列表幂等与覆盖语义；好友添加（含空指针防护）；13 条/页的分页游标与越界；备注/标签；消息追加顺序 |
+| `test_qrc_assets`（3 用例） | `rc.qrc` 可解析且非空；登记文件都真实存在；`images/`、`style/` 下文件都已登记（`style/_design_tokens.qss` 为设计参考，豁免） |
+
+---
+
+## 十一、已知问题与不一致
 
 | # | 问题 | 现状 / 建议 |
 |---|---|---|
 | 1 | 服务端不做消息持久化 | 聊天历史只在客户端内存，重登/换设备后历史丢失；离线消息也无补发（靠登录拉好友列表，无未读消息） |
 | 2 | 无心跳超时检测 | 对端网络静默断开时，连接状态依赖 TCP keepalive（默认 2 小时以上）才会发现 |
-| 3 | 服务器地址写死 | GateServer host/port 硬编码在 `src/utils.cpp`，建议改为配置/环境变量 |
+| 3 | ~~服务器地址写死~~ | 已支持 `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT` 覆盖，默认改为本地 `127.0.0.1:9090`（每次请求读取环境变量） |
 | 4 | 备注名 / 标签仅本地 | UserManager 的修改不会同步到服务端 |
 | 5 | 文件 / 图片消息未走协议 | 输入框支持拖拽、图片气泡可渲染，但未通过服务端转发（只有文本贯通） |
-| 6 | `UserManager` 成员未初始化 | `inc/usermanager.h:61-62` 附近成员未赋初值，存在读到脏值的风险 |
+| 6 | ~~`UserManager` 成员未初始化~~ | 已核实成员均有默认初始化（`token_` 空串、`userInfo_` 空指针、两张表为空），`GetUid()` 在未登录时返回 -1 |
 | 7 | 令牌存储位置 | 登录 token 保存在内存中的 UserManager，未落盘；退出即失效（安全上是好的，但也没有"记住我"） |
-| 8 | 单帧 2048 字节限制 | 客户端允许 10 MB 但服务端只收 2048 字节，长文本会被服务端断连，需在协议层统一 |
+| 8 | 单帧 2048 字节限制 | 服务端只收 2048 字节，超限直接断连；客户端已按 **UTF-8 字节 + JSON 包装开销**分批（单批 1024、单条 1024，常量见 `inc/constants.h` 的 `TextMsgLimits`），仍有消息大小上限 |
 
 ---
 

@@ -5,6 +5,7 @@
 #include "domainmodels.h"
 #include "usermanager.h"
 #include "chatservice.h"
+#include "constants.h"
 #include <QPaintEvent>
 #include <QStyleOption>
 #include <QPainter>
@@ -17,9 +18,6 @@
 #include "picturebubble.h"
 
 namespace {
-constexpr int kMaxTextBatchSize = 1024; // 单批文本消息总长度上限
-constexpr int kMaxSingleMsgLen = 1024;  // 单条消息内容长度上限
-
 // 加载头像：统一经 Utils::ResolveIcon 解析协议 icon 字段，圆形化（ChatMessageItem 头像固定 42x42）
 QPixmap LoadIconOrDefault(const QString &icon)
 {
@@ -140,19 +138,24 @@ void ChatPage::OnSendMsgBtnClicked()
         return;
     }
 
-    // 文本消息批量发送：累计长度超过上限时先 flush 一批
+    // 文本消息批量发送：按 UTF-8 字节数 + JSON 包装开销累计，超过上限时先 flush 一批
+    // （不能按 QString::length() 的字符数算：中文 1 字 3 字节，1024 字会超过服务端 2048 字节帧上限）
     QJsonArray textArray;
     int txtSize = 0;
 
     for (int i = 0; i < msgList.size(); ++i) {
-        // 单条消息内容过长则跳过
-        if (msgList[i].content.length() > kMaxSingleMsgLen) {
-            LOG_WARN() << "skip message, content too long:" << msgList[i].content.length();
+        const int contentBytes = msgList[i].content.toUtf8().size();
+        // 单条消息内容过长则跳过（超限会被服务端断连）
+        if (contentBytes > TextMsgLimits::MAX_SINGLE_MSG_BYTES) {
+            LOG_WARN() << "skip message, content too long:" << contentBytes << "bytes";
             continue;
         }
 
         const QString &type = msgList[i].msgFlag;
         LOG_DEBUG() << "send message type : " << type;
+
+        // 本条消息在报文里的估算开销（内容 + content/msg_id 键名与 uuid）
+        const int msgCost = contentBytes + TextMsgLimits::PER_MSG_JSON_OVERHEAD_BYTES;
 
         ChatMessageItem *item = new ChatMessageItem(true);
         item->SetUserName(selfName);
@@ -165,14 +168,14 @@ void ChatPage::OnSendMsgBtnClicked()
 
             bubble = new TextBubble(msgList[i].content, true);
 
-            // 累计长度超限则先把已累计的文本发出去
-            if (txtSize + msgList[i].content.length() > kMaxTextBatchSize) {
+            // 累计超限则先把已累计的文本发出去（空批次不发，避免多余回包）
+            if (!textArray.isEmpty() && txtSize + msgCost > TextMsgLimits::MAX_TEXT_BATCH_BYTES) {
                 ChatService::GetInstance().SendTextChatMsg(selfUid, currentUid_, textArray);
                 txtSize = 0;
                 textArray = QJsonArray();
             }
 
-            txtSize += msgList[i].content.length();
+            txtSize += msgCost;
             QJsonObject obj;
             obj["content"] = msgList[i].content;
             obj["msg_id"] = uuidString; 

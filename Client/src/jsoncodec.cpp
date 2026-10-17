@@ -39,6 +39,17 @@ std::shared_ptr<AddFriendApply> JsonParser::ParseNotifyAddFriendReq(const QByteA
                                             obj["icon"].toString(), obj["nick"].toString(), obj["sex"].toInt());
 }
 
+namespace {
+// 认证结果通知/回包的 action 归一化：只有显式 2 才算「拒绝」，
+// 缺省/0/未知值一律按「同意」——与服务端 ResolvePeerAuthAction 的旧协议兼容规则一致，
+// 避免旧消息或非法值被误显示成「对方拒绝」。
+int NormalizePeerAction(const QJsonObject &obj)
+{
+    const int action = obj.value("action").toInt(AcceptAction::ACCEPT);
+    return (action == AcceptAction::REJECT) ? AcceptAction::REJECT : AcceptAction::ACCEPT;
+}
+} // namespace
+
 NotifyAuthFriendResult JsonParser::ParseNotifyAuthFriendReq(const QByteArray &data)
 {
     NotifyAuthFriendResult result;
@@ -51,7 +62,7 @@ NotifyAuthFriendResult JsonParser::ParseNotifyAuthFriendReq(const QByteArray &da
     if (result.error != ErrorCodes::SUCCESS) {
         return result;
     }
-    result.action = obj.value("action").toInt(AcceptAction::ACCEPT);
+    result.action = NormalizePeerAction(obj);
     if (result.action == AcceptAction::ACCEPT) {
         result.info = std::make_shared<AcceptPeerInfo>(obj["from_uid"].toInt(), obj["name"].toString(),
                                                      obj["nick"].toString(), obj["icon"].toString(),
@@ -72,7 +83,7 @@ AuthFriendRspResult JsonParser::ParseAuthFriendRsp(const QByteArray &data)
     if (result.error != ErrorCodes::SUCCESS) {
         return result;
     }
-    result.action = obj.value("action").toInt(AcceptAction::ACCEPT);
+    result.action = NormalizePeerAction(obj);
     if (result.action == AcceptAction::ACCEPT) {
         result.info = std::make_shared<AcceptPeerInfo>(obj["uid"].toInt(), obj["name"].toString(),
                                                      obj["nick"].toString(), obj["icon"].toString(),

@@ -131,6 +131,10 @@ bool UserManager::CheckFriendById(int uid) const
 
 void UserManager::AddFriend(std::shared_ptr<AcceptPeerInfo> auth_info)
 {
+    if (!auth_info) {
+        LOG_WARN() << "add friend failed, auth info is null";
+        return;
+    }
     auto info = std::make_shared<FriendInfo>(auth_info);
     friendMap_[info->uid_] = info;
 }

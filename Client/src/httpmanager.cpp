@@ -22,7 +22,8 @@ void HttpManager::PostHttpReq(QUrl url, QJsonObject json, RequestId reqId)
             emit this->SigHttpFinish(reqId, "", ErrorCodes::ERR_NETWORK);
         } else { // 无错误则读回请求
             QString res = reply->readAll();
-            LOG_DEBUG() << res;
+            // 只记录长度不打印响应体：登录/注册回包含 token 等敏感字段，日志落盘会泄露
+            LOG_DEBUG() << "http response size:" << res.size();
             // 发送信号通知完成
             emit this->SigHttpFinish(reqId, res, ErrorCodes::SUCCESS);
         }

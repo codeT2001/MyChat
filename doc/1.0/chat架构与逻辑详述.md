@@ -464,7 +464,8 @@ cmake -S . -B build
 cmake --build build -j1
 ./build/ChatClient
 ```
-> 默认连接 `http://81.69.247.52:9090`（写死在 `Client/src/utils.cpp`），本地部署需改 `SERVER_HOST`。
+> 默认连接 `http://127.0.0.1:9090`（`Client/src/utils.cpp` 的 `DEFAULT_SERVER_HOST`），联调时用环境变量
+> `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT` 覆盖，无需改源码重编译。
 
 ---
 

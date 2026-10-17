@@ -132,7 +132,8 @@ cd <repo>/Client
 cmake -S . -B build && cmake --build build -j$(nproc)
 ```
 
-客户端默认连接 `http://81.69.247.52:9090`（写死在 [../Client/src/utils.cpp](../Client/src/utils.cpp)），换服务器需改 `SERVER_HOST` 后重编译。
+客户端默认连接 `http://127.0.0.1:9090`（[../Client/src/utils.cpp](../Client/src/utils.cpp) 的 `DEFAULT_SERVER_HOST`），
+换服务器用环境变量 `CHAT_SERVER_HOST` / `CHAT_SERVER_PORT` 覆盖，无需重编译。
 
 ## 四、启动与冒烟
 

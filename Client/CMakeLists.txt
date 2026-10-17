@@ -85,3 +85,15 @@ install(TARGETS ChatClient
 if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(ChatClient)
 endif()
+
+# ==============================================================================
+# 单元测试（CTest + Qt Test）
+#   构建：cmake -S . -B build && cmake --build build -j
+#   运行：ctest --test-dir build --output-on-failure
+#   关闭：-DBUILD_TESTING=OFF
+# 只编译被测的纯逻辑源文件（不加载 QSS/不建网络连接），离线可跑。
+# ==============================================================================
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

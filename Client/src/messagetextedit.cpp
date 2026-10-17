@@ -1,5 +1,6 @@
 #include "messagetextedit.h"
 #include "logger.h"
+#include "utils.h"
 #include <QDebug>
 #include <QMessageBox>
 
@@ -187,7 +188,7 @@ QPixmap MessageTextEdit::GetFileIconPixmap(const QString &url)
     QFileInfo fileinfo(url);
     QIcon icon = provider.icon(fileinfo);
 
-    QString strFileSize = FormatFileSize(fileinfo.size());
+    QString strFileSize = Utils::FormatFileSize(fileinfo.size());
 
     QFont font(QString("宋体"), 10, QFont::Normal, false);
     QFontMetrics fontMetrics(font);
@@ -214,22 +215,3 @@ QPixmap MessageTextEdit::GetFileIconPixmap(const QString &url)
     return pix;
 }
 
-QString MessageTextEdit::FormatFileSize(qint64 size)
-{
-    QString unit;
-    double num;
-    if (size < 1024) {
-        num = size;
-        unit = "B";
-    } else if (size < 1024 * 1224) {
-        num = size / 1024.0;
-        unit = "KB";
-    } else if (size < 1024LL * 1024 * 1024) {
-        num = size / 1024.0 / 1024.0;
-        unit = "MB";
-    } else {
-        num = size / 1024.0 / 1024.0 / 1024.0;
-        unit = "GB";
-    }
-    return QString::number(num, 'f', 2) + " " + unit;
-}

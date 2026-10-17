@@ -1,10 +1,7 @@
 #include "tcpmanager.h"
 #include "logger.h"
-namespace {
-constexpr uint32_t MSG_HEAD_LENGTH = sizeof(uint16_t) + sizeof(uint32_t); // msgId + msgLength
-constexpr int MAX_RECV_BUFFER_SIZE = 1024 * 1024;          // 接收缓冲区上限 1MB
-constexpr int MAX_MSG_BODY_SIZE = 10 * 1024 * 1024;        // 单条消息体上限 10MB
-} // namespace
+#include "msgcodec.h"
+
 TcpManager::TcpManager()
     : host_(""),
       port_(0),
@@ -35,7 +32,7 @@ TcpManager::TcpManager()
         buffer_.append(socket_.readAll());
 
         // 防止恶意协议包或服务器 bug 导致 buffer 无限增长
-        if (buffer_.size() > MAX_RECV_BUFFER_SIZE) {
+        if (buffer_.size() > static_cast<int>(MsgCodec::MAX_RECV_BUFFER)) {
             LOG_WARN() << "TcpManager: recv buffer overflow (" << buffer_.size() << "bytes), disconnecting";
             socket_.abort();
             return;
@@ -43,19 +40,17 @@ TcpManager::TcpManager()
 
         forever
         {
-            QDataStream stream(&buffer_, QIODevice::ReadOnly);
-            stream.setVersion(QDataStream::Qt_6_0);
             if (!recvPending_) {
-                if (buffer_.size() < static_cast<int>(MSG_HEAD_LENGTH)) {
+                if (buffer_.size() < static_cast<int>(MsgCodec::HEAD_TOTAL_LENGTH)) {
                     return;
                 }
 
-                stream >> msgId_ >> msgLength_;
+                MsgCodec::DecodeMsgHead(buffer_, msgId_, msgLength_);
 
-                buffer_ = buffer_.mid(MSG_HEAD_LENGTH);
+                buffer_ = buffer_.mid(static_cast<int>(MsgCodec::HEAD_TOTAL_LENGTH));
 
-                // 协议合理性校验：单条消息不能超过 MAX_MSG_BODY_SIZE
-                if (msgLength_ > MAX_MSG_BODY_SIZE) {
+                // 协议合理性校验：单条消息不能超过客户端接收上限
+                if (!MsgCodec::IsAcceptableBodySize(msgLength_)) {
                     LOG_WARN() << "TcpManager: invalid msgLength_=" << msgLength_ << ", disconnecting";
                     socket_.abort();
                     return;
@@ -104,15 +99,14 @@ void TcpManager::Connect(ServerInfo info)
 
 void TcpManager::Send(RequestId id, const QByteArray &data)
 {
-    LOG_DEBUG() << "msgId : " << static_cast<uint32_t>(id) << "send data : " << QString(data);
-    uint16_t copyId = static_cast<uint16_t>(id);
-    uint32_t len = static_cast<uint32_t>(data.size());
-    QByteArray block;
-    block.reserve(MSG_HEAD_LENGTH + data.size());
-    QDataStream out(&block, QIODevice::WriteOnly);
-    out.setByteOrder(QDataStream::BigEndian);
-    out << copyId << len;
-    block.append(data);
+    // 只记录长度不打印报文内容：登录请求等报文体含 token，日志落盘会泄露敏感信息
+    LOG_DEBUG() << "msgId : " << static_cast<uint32_t>(id) << ", send data size : " << data.size();
+    if (data.size() > static_cast<int>(MsgCodec::MAX_SERVER_FRAME_BODY)) {
+        // 服务端超限帧会直接断开连接，这里只告警（分批策略由调用方负责）
+        LOG_WARN() << "TcpManager: body size" << data.size() << "exceeds server frame limit"
+                   << MsgCodec::MAX_SERVER_FRAME_BODY << ", server may drop the connection";
+    }
+    QByteArray block = MsgCodec::EncodeFrame(static_cast<uint16_t>(id), data);
     qint64 bytesWritten = socket_.write(block);
     if (bytesWritten == -1) {
         LOG_WARN() << "TcpManager: socket write failed:" << socket_.errorString()

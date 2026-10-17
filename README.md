@@ -32,7 +32,7 @@
 | 好友申请 / 认证 | 同服直推、跨服 gRPC 转发 | ChatServer |
 | 实时文本消息 | 批量消息转发、已读状态 | ChatServer |
 | 在线会话管理 | 会话表 + Redis 路由/在线计数 | ChatServer + Redis |
-| 自动化回归测试 | 业务逻辑与 DB/Redis/gRPC 解耦，测试注入 fake；离线可跑 | `Servers/tests`（CTest）+ `Servers/VerifyServer/test`（Node） |
+| 自动化回归测试 | 业务逻辑与 DB/Redis/gRPC 解耦，测试注入 fake；离线可跑 | `Servers/tests`、`Client/tests`（CTest）+ `Servers/VerifyServer/test`（Node） |
 
 ---
 
@@ -43,6 +43,7 @@ chat/
 ├── Client/                     # Qt 6 / C++17 桌面客户端
 │   ├── src/  inc/              #   实现与头文件
 │   ├── ui/  style/  images/    #   Designer 界面、QSS 样式、图片资源
+│   ├── tests/                  #   CTest 单元测试（Qt Test，契约/编解码/工具/数据层，默认启用）
 │   └── README.md               #   客户端文档（架构图 + 关键操作时序图）
 │
 └── Servers/                    # 服务端集群（顶层 CMakeLists 在此）
@@ -179,13 +180,13 @@ ChatServer 登录时直连 Redis 校验，**不删除**、靠 TTL 自然过期�
 
 | 组件 | 技术栈 | 端口 |
 | --- | --- | --- |
-| Client | Qt 6 Widgets / C++17 / QNetworkAccessManager / QTcpSocket | — |
+| Client | Qt 6 Widgets / C++17 / QNetworkAccessManager / QTcpSocket（测试用 Qt Test） | — |
 | GateServer | C++17 / Boost.Asio + Beast / gRPC / MySQL / Redis | 9090 |
 | ChatServer | C++17 / Boost.Asio / gRPC / MySQL / Redis | TCP 50061/50062，gRPC 50081/50082 |
 | StatusServer | C++17 / gRPC / Redis / MySQL | 50052 |
 | VerifyServer | Node.js / @grpc/grpc-js / ioredis / nodemailer | 50051 |
 | 存储 | Redis 6+ / MySQL 8+ | 6379 / 3306 |
-| 测试 | CTest（自建零依赖框架）+ Node 内置 `node --test` | — |
+| 测试 | 服务端 CTest（自建零依赖框架）/ 客户端 CTest + Qt Test / Node 内置 `node --test` | — |
 
 **依赖版本要求**
 
@@ -263,6 +264,12 @@ ss -ltnp | grep -E '9090|50061|50062|50051|50052'
 **离线即可运行**（无需起任何服务）。
 
 ```bash
+# 客户端 C++（CTest + Qt Test，只编译被测的纯逻辑源文件）
+cd Client
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+
 # 服务端 C++（CTest，零外部框架）
 cd Servers
 cmake -S . -B build -G Ninja
@@ -273,11 +280,16 @@ ctest --test-dir build --output-on-failure
 cd VerifyServer && npm install && npm test
 ```
 
-当前覆盖：**11 个 C++ 测试（103 个用例）+ 3 个 Node 测试文件**，包括注册/登录/改密/搜人/好友申请与认证/
-文本消息的判定分支、口令摘要与恒定时间比较、TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、
-HTTP 查询串解析、顶号会话表语义、跨语言错误码契约。清单见 [`Servers/README.md`](Servers/README.md#单元测试)。
+当前覆盖：**服务端 11 个 C++ 测试（103 个用例）+ 客户端 6 个测试（45 个用例）+ 3 个 Node 测试文件**。
+服务端覆盖注册/登录/改密/搜人/好友申请与认证/文本消息的判定分支、口令摘要与恒定时间比较、
+TCP 帧头大端字节序（与客户端 `QDataStream` 对齐）、HTTP 查询串解析、顶号会话表语义；
+客户端覆盖「客户端常量 ↔ 服务端权威定义」的协议契约（消息号/错误码/action/HTTP 路径/头像数量）、
+帧编解码与帧长上限、JSON 请求序列化与回包解析、表单校验与服务器地址、`UserManager` 分页与备注、
+`rc.qrc` 资源登记；Node 侧覆盖验证码与跨语言错误码契约。
+清单见 [`Servers/README.md`](Servers/README.md#单元测试) 与 [`Client/README.md`](Client/README.md#单元测试)。
 
-改动后的最低要求：`-j1` 编译通过 + `ctest` 全绿；测试用到的纯逻辑文件见 `Servers/AGENTS.md`。
+改动后的最低要求：服务端 `-j1` 编译通过 + `ctest` 全绿，客户端 `cmake --build build` 通过 + `ctest` 全绿；
+测试用到的纯逻辑文件见 `Servers/AGENTS.md` / `Client/AGENTS.md`。
 
 ---
 
@@ -311,7 +323,7 @@ HTTP 查询串解析、顶号会话表语义、跨语言错误码契约。清单
 | 安全 | `Servers/VerifyServer/config.json` 明文存放 QQ 邮箱授权码 | 泄露即被滥用，务必替换 |
 | 安全 | `utoken_{uid}` 校验后不删除，600 秒 TTL 内可重放（一次性消费的 `StatusService.Login` 未接入链路） | 短暂泄露 token 即可重复建立 TCP 登录 |
 | 安全 | 口令为固定盐 SHA-256 摘要（`password_crypto`，非 bcrypt/argon2、无逐用户盐） | 抗暴力破解能力弱于专业 KDF，建议换 bcrypt/argon2 |
-| 协议 | 单帧上限 2048 字节，超限帧被**拒绝并断开连接**（不截断） | 不支持大消息，客户端需自行分批 |
+| 协议 | 单帧上限 2048 字节，超限帧被**拒绝并断开连接**（不截断） | 客户端已按 UTF-8 字节 + JSON 包装开销分批（单批 1024），仍不支持大消息 |
 | 协议 | JSON 文本协议，体积大、无 schema 校验 | 带宽浪费、易错 |
 | 架构 | 业务判定已抽成纯函数 + 接口注入（可单测），但适配器仍是 Meyers 单例、构造期做 IO | 换实现（如换存储）仍要改单例绑定点，`*_flow` 之外的代码仍难单测 |
 | 架构 | Redis 路由键 `userver_` 无 TTL（靠断连时删除 + 下次登录覆盖自愈） | 进程被强杀时路由残留，直到该用户下次登录才被覆盖 |

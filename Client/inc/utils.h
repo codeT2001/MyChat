@@ -50,6 +50,10 @@ public:
     static QString GetServerUrl(const QString &path);
     static void ClearTips();
 
+    // 字节数 → 可读大小（B/KB/MB/GB，保留两位小数）。
+    // 输入区文件缩略图与测试共用；纯函数，不依赖 UI。
+    static QString FormatFileSize(qint64 size);
+
     // 服务端 icon 字段 -> 本地头像资源路径（唯一入口）。
     // 约定："head_N" -> ":/images/head_N.jpg"（N=1..kAvatarCount）；
     // 空串/历史占位("icon")/非法值 -> 默认头像；已是 qrc 路径(":/...")原样透传
